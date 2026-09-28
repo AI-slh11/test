@@ -12,13 +12,16 @@ export default function GreenRoom() {
   const [results, setResults] = useState(null);
   const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
 
   const loadPrograms = () => api.listPrograms().then(setPrograms).catch(() => {});
   useEffect(() => { loadPrograms(); api.listJudges().then(setJudges).catch(() => {}); }, []);
 
   const loadRegistrations = (programId) => {
     if (!programId) return;
-    api.listRegistrations(programId).then(setRegistrations).catch(() => {});
+    api.listRegistrations(programId).then(setRegistrations).catch(err => setError(err.message));
     api.results(programId).then(setResults).catch(() => {});
   };
 
@@ -29,14 +32,52 @@ export default function GreenRoom() {
   const onsiteRegister = async (e) => {
     e.preventDefault();
     setError('');
+    setNotice('');
     try {
       await api.register({ ...form, program_id: activeProgram, source: 'onsite' });
       setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
       loadRegistrations(activeProgram);
       loadPrograms();
+      setNotice('Student registered.');
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const saveRegistration = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setNotice('');
+    try {
+      await api.updateRegistration(editing.id, editing.values);
+      setEditing(null);
+      loadRegistrations(activeProgram);
+      setNotice('Registration updated.');
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  };
+
+  const removeRegistration = async (registration) => {
+    if (!window.confirm(`Remove ${registration.student_name} (${registration.participant_id})? This permanently deletes the registration and its scorecards. Unpublish the program before removing a registration.`)) return;
+    setError('');
+    setNotice('');
+    try {
+      await api.deleteRegistration(registration.id);
+      loadRegistrations(activeProgram);
+      loadPrograms();
+      setNotice('Registration removed. Its scorecards were also deleted.');
+    } catch (err) { setError(err.message); }
+  };
+
+  const changeStatus = async (registrationId, status) => {
+    setError('');
+    setNotice('');
+    try {
+      await api.setStatus(registrationId, status);
+      loadRegistrations(activeProgram);
+      setNotice('Registration status updated.');
+    } catch (err) { setError(err.message); }
   };
 
   const toggleJudge = async (judgeId, alreadyAssigned) => {
@@ -58,6 +99,8 @@ export default function GreenRoom() {
 
       {program && (
         <>
+          {error && <p className="error" role="alert">{error}</p>}
+          {notice && <p className="success" role="status">{notice}</p>}
           <div className="grid-2">
             <div className="card">
               <h3>Register Student On-Site</h3>
@@ -106,19 +149,56 @@ export default function GreenRoom() {
 
           <div className="card">
             <h3>All Registrations for {programLabel(program)}</h3>
+            {program.results_published && <p className="muted">Unpublish this program from Results before editing or removing registrations.</p>}
             <table>
-              <thead><tr><th>Code</th><th>Name</th><th>Student ID</th><th>Team</th><th>Source</th><th>Status</th></tr></thead>
+              <thead><tr><th>Code</th><th>Name</th><th>Student ID</th><th>Team</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {registrations.map(r => (
+                {registrations.map(r => editing?.id === r.id ? (
+                  <tr key={r.id}>
+                    <td>{r.code_letter}</td>
+                    <td><input aria-label="Student name" value={editing.values.student_name} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, student_name: e.target.value } }))} required /></td>
+                    <td><input aria-label="Student ID" value={editing.values.student_id} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, student_id: e.target.value } }))} required /></td>
+                    <td>
+                      <select value={editing.values.team_name} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, team_name: e.target.value } }))} required>
+                        {TEAMS.map(t => <option key={t.key} value={t.key}>{t.key}</option>)}
+                      </select>
+                      <label className="checkbox">
+                        <input type="checkbox" checked={editing.values.is_team} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, is_team: e.target.checked } }))} />
+                        Group entry
+                      </label>
+                      {editing.values.is_team && <input aria-label="Group members" placeholder="Team members" value={editing.values.team_members}
+                        onChange={e => setEditing(current => ({ ...current, values: { ...current.values, team_members: e.target.value } }))} />}
+                    </td>
+                    <td>{r.source}</td>
+                    <td>{r.status}</td>
+                    <td>
+                      <button disabled={saving} onClick={saveRegistration}>{saving ? 'Saving…' : 'Save'}</button>
+                      <button className="secondary" disabled={saving} onClick={() => setEditing(null)}>Cancel</button>
+                    </td>
+                  </tr>
+                ) : (
                   <tr key={r.id}>
                     <td>{r.code_letter}</td>
                     <td>{r.student_name}</td>
                     <td>{r.student_id}</td>
                     <td><TeamBadge name={r.team_name} /></td>
                     <td>{r.source}</td>
-                    <td>{r.status}</td>
+                    <td>
+                      <select aria-label={`Status for ${r.participant_id}`} value={r.status} disabled={program.results_published}
+                        onChange={e => changeStatus(r.id, e.target.value)}>
+                        {['registered', 'submission_received', 'slot_assigned', 'judged', 'results_announced'].map(status => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
+                      </select>
+                    </td>
+                    <td>
+                      <button disabled={program.results_published} onClick={() => setEditing({ id: r.id, values: {
+                        student_name: r.student_name, student_id: r.student_id, team_name: r.team_name || TEAMS[0].key,
+                        is_team: !!r.is_team, team_members: r.team_members || '', language: r.language || ''
+                      } })}>Edit</button>
+                      <button className="danger" disabled={program.results_published} onClick={() => removeRegistration(r)}>Remove</button>
+                    </td>
                   </tr>
                 ))}
+                {registrations.length === 0 && <tr><td colSpan={7} className="muted">No registrations for this program yet.</td></tr>}
               </tbody>
             </table>
           </div>

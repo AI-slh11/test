@@ -109,7 +109,12 @@ router.patch('/:id/status', requireOrganizerOrControlAdmin, (req, res) => {
 router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const cur = db.prepare('SELECT * FROM registrations WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Registration not found' });
+  const program = db.prepare('SELECT results_published FROM programs WHERE id = ?').get(cur.program_id);
+  if (program?.results_published) return res.status(409).json({ error: 'Unpublish this program before editing registrations' });
   const b = req.body;
+  if (b.student_name !== undefined && (typeof b.student_name !== 'string' || !b.student_name.trim())) {
+    return res.status(400).json({ error: 'Student name is required' });
+  }
   let studentId = cur.student_id;
   if (b.student_id !== undefined) {
     studentId = String(b.student_id).trim().toUpperCase();
@@ -120,17 +125,21 @@ router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   // empty string = "leave as is" (older registrations may have no team yet)
   if (b.team_name && !TEAMS.includes(b.team_name)) return res.status(400).json({ error: 'Invalid team' });
   db.prepare('UPDATE registrations SET student_name=?, student_id=?, is_team=?, team_members=?, language=?, team_name=? WHERE id=?').run(
-    b.student_name ?? cur.student_name, studentId,
+    b.student_name !== undefined ? b.student_name.trim() : cur.student_name, studentId,
     'is_team' in b ? (b.is_team ? 1 : 0) : cur.is_team,
     'team_members' in b ? (b.team_members || null) : cur.team_members,
     'language' in b ? (b.language || null) : cur.language, b.team_name || cur.team_name, cur.id);
+  req.app.get('io').to(`program:${cur.program_id}`).emit('score:submitted', {});
   res.json({ ok: true });
 });
 
 router.delete('/:id', requireOrganizerOrControlAdmin, (req, res) => {
-  const cur = db.prepare('SELECT program_id FROM registrations WHERE id = ?').get(req.params.id);
+  const cur = db.prepare(`SELECT r.program_id, p.results_published FROM registrations r
+    JOIN programs p ON p.id = r.program_id WHERE r.id = ?`).get(req.params.id);
+  if (!cur) return res.status(404).json({ error: 'Registration not found' });
+  if (cur.results_published) return res.status(409).json({ error: 'Unpublish this program before removing registrations' });
   db.prepare('DELETE FROM registrations WHERE id = ?').run(req.params.id);
-  if (cur) req.app.get('io').to(`program:${cur.program_id}`).emit('score:submitted', {});
+  req.app.get('io').to(`program:${cur.program_id}`).emit('score:submitted', {});
   res.json({ ok: true });
 });
 
