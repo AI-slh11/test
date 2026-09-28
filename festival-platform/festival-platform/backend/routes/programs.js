@@ -132,6 +132,12 @@ router.patch('/:id/published', (req, res) => {
     if (!fullyJudged) {
       return res.status(409).json({ error: 'All participants must be fully judged before results can be published' });
     }
+    const requiredPlaces = Math.min(3, registrations.length);
+    const assignedPlaces = new Set(db.prepare('SELECT result_place FROM registrations WHERE program_id = ? AND result_place IS NOT NULL').all(prog.id).map(row => row.result_place));
+    const completePodium = requiredPlaces > 0 && Array.from({ length: requiredPlaces }, (_, index) => index + 1).every(place => assignedPlaces.has(place));
+    if (!completePodium) {
+      return res.status(409).json({ error: `Assign 1st, 2nd and 3rd places before publishing (${requiredPlaces} place${requiredPlaces === 1 ? '' : 's'} required)` });
+    }
     if (!prog.results_published) {
       db.prepare("UPDATE programs SET results_published = 1, published_at = datetime('now') WHERE id = ?").run(prog.id);
       db.prepare("UPDATE registrations SET status = 'results_announced' WHERE program_id = ? AND status = 'judged'").run(prog.id);
@@ -154,3 +160,4 @@ router.patch('/:id/quota', (req, res) => {
 });
 
 module.exports = router;
+

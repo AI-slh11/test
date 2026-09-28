@@ -56,6 +56,8 @@ export const api = {
   publicFeed: () => request('/results/public/feed'),
   setPublished: (programId, published) => request(`/programs/${programId}/published`, { method: 'PATCH', body: JSON.stringify({ published }) }),
 
+  reviewResults: (programId) => request(`/results/${programId}/review`),
+  setResultPlaces: (programId, placements) => request(`/results/${programId}/placements`, { method: 'PUT', body: JSON.stringify({ placements }) }),
   results: (programId) => request(`/results/${programId}`),
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };

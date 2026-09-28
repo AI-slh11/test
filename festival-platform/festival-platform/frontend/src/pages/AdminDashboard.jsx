@@ -3,8 +3,9 @@ import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
 import PasswordChange from '../PasswordChange.jsx';
+import OrganizerResults from './OrganizerResults.jsx';
 
-const TABS = ['Overview', 'Programs', 'Judges', 'Registrations'];
+const TABS = ['Overview', 'Programs', 'Judges', 'Registrations', 'Results'];
 
 export default function AdminDashboard() {
   const [tab, setTab] = useState('Overview');
@@ -202,6 +203,7 @@ export default function AdminDashboard() {
           </table>
         </div>
       )}
+      {tab === 'Results' && <OrganizerResults programs={programs} />}
       <PasswordChange />
     </div>
   );
@@ -221,3 +223,4 @@ function NewJudge({ onCreate }) {
     </div>
   );
 }
+

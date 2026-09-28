@@ -124,7 +124,9 @@ export default function GreenRoom() {
           </div>
 
           <div className="card">
-            <h3>Final Results (averaged score only — individual judge scores stay confidential)</h3>
+            <h3>Results preview</h3>
+            <p className="muted">Review individual judge scorecards, set the podium and publish from the Results tab in the organizer dashboard.</p>
+            <a href="/admin/dashboard">Open organizer dashboard</a>
             {results?.ranked?.length ? (
               <table>
                 <thead><tr><th>Rank</th><th>Code</th><th>Avg Score</th><th>Judges Submitted</th><th>Certificate</th></tr></thead>
@@ -149,3 +151,4 @@ export default function GreenRoom() {
     </div>
   );
 }
+

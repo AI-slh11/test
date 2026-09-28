@@ -72,6 +72,10 @@ if (!db.prepare("PRAGMA table_info(programs)").all().some(c => c.name === 'quota
 // Migration: team (Aliora / Nexiora) on registrations; publish state on programs
 const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
 if (!hasCol('registrations', 'team_name')) db.exec('ALTER TABLE registrations ADD COLUMN team_name TEXT');
+if (!hasCol('registrations', 'result_place')) {
+  db.exec('ALTER TABLE registrations ADD COLUMN result_place INTEGER CHECK (result_place IS NULL OR result_place BETWEEN 1 AND 3)');
+}
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_program_result_place ON registrations(program_id, result_place) WHERE result_place IS NOT NULL');
 if (!hasCol('programs', 'results_published')) db.exec('ALTER TABLE programs ADD COLUMN results_published INTEGER NOT NULL DEFAULT 0');
 if (!hasCol('programs', 'published_at')) db.exec('ALTER TABLE programs ADD COLUMN published_at TEXT');
 
@@ -136,3 +140,4 @@ for (const row of passwordRows) {
 require('./programSeed').seedPrograms(db);
 
 module.exports = db;
+
