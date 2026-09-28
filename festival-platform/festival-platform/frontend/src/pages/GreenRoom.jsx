@@ -10,7 +10,7 @@ export default function GreenRoom() {
   const [activeProgram, setActiveProgram] = useState('');
   const [registrations, setRegistrations] = useState([]);
   const [results, setResults] = useState(null);
-  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
+  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null);
@@ -28,14 +28,26 @@ export default function GreenRoom() {
   useEffect(() => { loadRegistrations(activeProgram); }, [activeProgram]);
 
   const program = programs.find(p => String(p.id) === String(activeProgram));
+  const assignmentConflicts = program ? form.judge_ids.flatMap(judgeId => {
+    const judge = judges.find(item => String(item.id) === String(judgeId));
+    if (!judge || !program.time_slot?.trim()) return [];
+    const conflictingProgram = programs.find(item => String(item.id) !== String(program.id)
+      && item.time_slot?.trim().toLowerCase() === program.time_slot.trim().toLowerCase()
+      && item.judges.some(assigned => String(assigned.id) === String(judgeId)));
+    return conflictingProgram ? [`${judge.name} is already assigned to ${programLabel(conflictingProgram)} at ${program.time_slot}.`] : [];
+  }) : [];
 
   const onsiteRegister = async (e) => {
     e.preventDefault();
     setError('');
     setNotice('');
+    if (assignmentConflicts.length) {
+      setError(assignmentConflicts.join(' '));
+      return;
+    }
     try {
       await api.register({ ...form, program_id: activeProgram, source: 'onsite' });
-      setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
+      setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
       loadRegistrations(activeProgram);
       loadPrograms();
       setNotice('Student registered.');
@@ -81,10 +93,21 @@ export default function GreenRoom() {
   };
 
   const toggleJudge = async (judgeId, alreadyAssigned) => {
-    if (alreadyAssigned) await api.unassignJudge(activeProgram, judgeId);
-    else await api.assignJudge(activeProgram, judgeId);
-    loadPrograms();
+    setError('');
+    setNotice('');
+    try {
+      if (alreadyAssigned) await api.unassignJudge(activeProgram, judgeId);
+      else await api.assignJudge(activeProgram, judgeId);
+      loadPrograms();
+    } catch (err) { setError(err.message); }
   };
+
+  const toggleRegistrationJudge = (judgeId) => setForm(current => ({
+    ...current,
+    judge_ids: current.judge_ids.includes(judgeId)
+      ? current.judge_ids.filter(id => id !== judgeId)
+      : [...current.judge_ids, judgeId]
+  }));
 
   return (
     <div>
@@ -128,8 +151,20 @@ export default function GreenRoom() {
                     <input value={form.language} onChange={e => setForm({ ...form, language: e.target.value })} required />
                   </>
                 )}
+                <fieldset className="card" style={{ margin: '12px 0' }}>
+                  <legend>Assign judges with this registration</legend>
+                  <p className="muted small">Selected judges will be assigned to this program as the student is registered. Same-time-slot conflicts are blocked with an alert.</p>
+                  {judges.map(judge => (
+                    <label key={judge.id} className="checkbox">
+                      <input type="checkbox" checked={form.judge_ids.includes(judge.id)}
+                        onChange={() => toggleRegistrationJudge(judge.id)} disabled={program.results_published} />
+                      {judge.name}{program.judges.some(assigned => assigned.id === judge.id) ? ' · already assigned' : ''}
+                    </label>
+                  ))}
+                  {assignmentConflicts.map(conflict => <p className="error" role="alert" key={conflict}>{conflict}</p>)}
+                </fieldset>
                 {error && <p className="error">{error}</p>}
-                <button type="submit">Register (instantly syncs to judges)</button>
+                <button type="submit" disabled={saving || !!program.results_published || assignmentConflicts.length > 0}>Register (instantly syncs to judges)</button>
               </form>
             </div>
 
@@ -139,7 +174,7 @@ export default function GreenRoom() {
                 const assigned = program.judges.some(pj => pj.id === j.id);
                 return (
                   <label key={j.id} className="checkbox">
-                    <input type="checkbox" checked={assigned} onChange={() => toggleJudge(j.id, assigned)} />
+                    <input type="checkbox" checked={assigned} disabled={program.results_published} onChange={() => toggleJudge(j.id, assigned)} />
                     {j.name} ({j.code})
                   </label>
                 );

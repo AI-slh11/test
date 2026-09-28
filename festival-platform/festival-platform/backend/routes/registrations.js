@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { TEAMS } = require('../teams');
-const { requireRole, requireOrganizerOrControlAdmin, isAssignedJudge } = require('../sessionAuth');
+const { optionalAuth, requireRole, requireOrganizerOrControlAdmin, isAssignedJudge } = require('../sessionAuth');
+const { assignmentConflict } = require('../judgeAssignments');
 
 // 4 digits + 2-3 letters + 3 digits, e.g. 2023CSE001
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
@@ -21,8 +22,15 @@ function letterForIndex(n) {
 
 // Register a student for a program. Works identically for organizer on-site (Green Room)
 // registration and public online self-registration; `source` distinguishes them.
-router.post('/', (req, res) => {
+router.post('/', optionalAuth, (req, res) => {
   const { program_id, student_name, student_id, is_team, team_members, language, source, team_name } = req.body;
+  const requestedJudges = req.body?.judge_ids ?? [];
+  if (!Array.isArray(requestedJudges) || requestedJudges.some(id => !Number.isInteger(Number(id)) || Number(id) < 1)) {
+    return res.status(400).json({ error: 'judge_ids must contain valid judge IDs' });
+  }
+  if (requestedJudges.length && req.user?.role !== 'organizer' && !req.admin) {
+    return res.status(403).json({ error: 'Only organizers can assign judges during registration' });
+  }
   if (!program_id || !student_name || !student_id) {
     return res.status(400).json({ error: 'program_id, student_name, student_id required' });
   }
@@ -35,6 +43,13 @@ router.post('/', (req, res) => {
   }
   const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(program_id);
   if (!program) return res.status(404).json({ error: 'Program not found' });
+  if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before registering students or changing its panel' });
+
+  const judgeIds = [...new Set(requestedJudges.map(Number))];
+  for (const judgeId of judgeIds) {
+    const conflict = assignmentConflict(program_id, judgeId);
+    if (conflict) return res.status(conflict === 'Program not found' ? 404 : 409).json({ error: conflict });
+  }
 
   const duplicate = db.prepare('SELECT id FROM registrations WHERE program_id = ? AND student_id = ?').get(program_id, studentId);
   if (duplicate) return res.status(409).json({ error: 'This Student ID is already registered for this program' });
@@ -52,13 +67,21 @@ router.post('/', (req, res) => {
     idx++;
   } while (db.prepare('SELECT 1 FROM registrations WHERE participant_id = ?').get(participantId));
 
-  const info = db.prepare(`
+  const register = db.transaction(() => {
+    const info = db.prepare(`
     INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name)
     VALUES (?,?,?,?,?,?,?,?,?,?)
-  `).run(
-    program_id, student_name, studentId, is_team ? 1 : 0, team_members || null,
-    language || program.language || null, codeLetter, participantId, source === 'onsite' ? 'onsite' : 'online', team_name
-  );
+    `).run(
+      program_id, student_name.trim(), studentId, is_team ? 1 : 0, team_members || null,
+      language || program.language || null, codeLetter, participantId, source === 'onsite' ? 'onsite' : 'online', team_name
+    );
+    const assign = db.prepare('INSERT OR IGNORE INTO program_judges (program_id, judge_id) VALUES (?, ?)');
+    judgeIds.forEach(judgeId => assign.run(program_id, judgeId));
+    return info;
+  });
+  let info;
+  try { info = register(); }
+  catch (error) { return res.status(409).json({ error: 'Registration could not be saved. Check duplicate student IDs and judge assignments.' }); }
 
   const registration = db.prepare('SELECT * FROM registrations WHERE id = ?').get(info.lastInsertRowid);
 

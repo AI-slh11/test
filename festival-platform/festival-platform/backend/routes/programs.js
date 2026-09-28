@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { optionalAuth, requireRole, requireOrganizerOrControlAdmin } = require('../sessionAuth');
+const { assignmentConflict } = require('../judgeAssignments');
 
 const CATEGORIES = ['premier', 'junior'];
 const FIRST_NUMBER = { premier: 28, junior: 96 };
@@ -73,16 +74,22 @@ router.post('/', (req, res) => {
 
 // Assign a judge to a program (manual assignment by organizer)
 router.post('/:id/judges', (req, res) => {
-  const { judge_id } = req.body;
+  const judge_id = Number(req.body?.judge_id);
+  if (!Number.isInteger(judge_id) || judge_id < 1) return res.status(400).json({ error: 'Select a valid judge' });
+  const conflict = assignmentConflict(req.params.id, judge_id);
+  if (conflict) return res.status(conflict === 'Program not found' ? 404 : 409).json({ error: conflict });
   try {
     db.prepare('INSERT INTO program_judges (program_id, judge_id) VALUES (?,?)').run(req.params.id, judge_id);
     res.status(201).json({ ok: true });
-  } catch (e) {
-    res.status(400).json({ error: 'Judge already assigned to this program' });
+  } catch {
+    res.status(409).json({ error: 'Judge is already assigned to this program' });
   }
 });
 
 router.delete('/:id/judges/:judgeId', (req, res) => {
+  const program = db.prepare('SELECT id, results_published FROM programs WHERE id = ?').get(req.params.id);
+  if (!program) return res.status(404).json({ error: 'Program not found' });
+  if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before changing judge assignments' });
   db.prepare('DELETE FROM program_judges WHERE program_id = ? AND judge_id = ?').run(req.params.id, req.params.judgeId);
   res.json({ ok: true });
 });
