@@ -14,7 +14,7 @@ export default function Login() {
     e.preventDefault();
     setError('');
     try {
-      const { user, token } = await api.login(code, password);
+      const { user, token } = await api.login(code.trim().toUpperCase(), password);
       login(user, token);
       navigate(user.role === 'organizer' ? '/green-room' : '/judge');
     } catch (err) {
@@ -25,15 +25,15 @@ export default function Login() {
   return (
     <div className="card narrow">
       <h2>Organizer / Judge Login</h2>
-      <p className="muted">Default seed accounts: ORG-001 / organizer123, JUDGE-2024-001 / judge123</p>
       <form onSubmit={submit}>
         <label>Login Code</label>
-        <input value={code} onChange={e => setCode(e.target.value)} placeholder="ORG-001 or JUDGE-2024-001" required />
+        <input value={code} onChange={e => setCode(e.target.value)} placeholder="ORG-001 or JUDGE-2024-001" autoComplete="username" autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
         <label>Password</label>
-        <input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} autoComplete="current-password" required />
         {error && <p className="error">{error}</p>}
         <button type="submit">Log in</button>
       </form>
     </div>
   );
 }
+

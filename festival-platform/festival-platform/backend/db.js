@@ -107,26 +107,27 @@ if (production) {
 }
 
 const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
-if (userCount === 0) {
-  const insert = db.prepare('INSERT INTO users (code, password, name, role) VALUES (?,?,?,?)');
-  for (const account of seedAccounts) {
-    const password = process.env[account.passwordKey] || account.fallback;
-    insert.run(account.code, hashPassword(password), account.name, account.role);
+const insertSeedAccount = db.prepare('INSERT INTO users (code, password, name, role) VALUES (?,?,?,?)');
+const updateSeedPassword = db.prepare('UPDATE users SET password = ? WHERE id = ?');
+for (const account of seedAccounts) {
+  const configuredPassword = process.env[account.passwordKey];
+  const password = configuredPassword || account.fallback;
+  const existing = db.prepare('SELECT id, password FROM users WHERE code = ?').get(account.code);
+
+  if (!existing) {
+    insertSeedAccount.run(account.code, hashPassword(password), account.name, account.role);
+    continue;
   }
-} else {
-  // Rotate the credentials from earlier seeded releases exactly when they still match
-  // the public development defaults; preserve any organizer- or judge-changed password.
-  for (const account of seedAccounts) {
-    const password = process.env[account.passwordKey];
-    if (!password) continue;
-    const row = db.prepare('SELECT id, password FROM users WHERE code = ?').get(account.code);
-    if (row && (row.password === account.fallback || verifyPassword(account.fallback, row.password))) {
-      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(password), row.id);
-    }
+
+  // Seed passwords are the configured source of truth so a recreated ephemeral
+  // database accepts the same login. In development, keep user-changed passwords.
+  if (configuredPassword) {
+    const isLegacyDefault = existing.password === account.fallback
+      || verifyPassword(account.fallback, existing.password);
+    const matchesConfigured = verifyPassword(configuredPassword, existing.password);
+    if (!production && !isLegacyDefault && !matchesConfigured) continue;
+    if (!matchesConfigured) updateSeedPassword.run(hashPassword(configuredPassword), existing.id);
   }
-  const third = seedAccounts[3];
-  db.prepare('INSERT OR IGNORE INTO users (code, password, name, role) VALUES (?,?,?,?)')
-    .run(third.code, hashPassword(process.env[third.passwordKey] || third.fallback), third.name, third.role);
 }
 
 // Upgrade legacy plaintext user passwords on existing installations.
@@ -140,4 +141,5 @@ for (const row of passwordRows) {
 require('./programSeed').seedPrograms(db);
 
 module.exports = db;
+
 
