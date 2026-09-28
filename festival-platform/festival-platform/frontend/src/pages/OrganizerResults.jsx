@@ -13,6 +13,8 @@ export default function OrganizerResults({ programs }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const [editingScore, setEditingScore] = useState(null);
+  const [scoreForm, setScoreForm] = useState({ score: '', grade: 'A', remarks: '' });
 
   const loadReview = async (id = programId) => {
     if (!id) { setReview(null); return; }
@@ -101,6 +103,21 @@ export default function OrganizerResults({ programs }) {
 
   const scoreFor = (participant, judgeId) => participant.scores.find(score => score.judge_id === judgeId);
 
+  const saveScore = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      await api.updateScore(editingScore.id, { ...scoreForm, score: Number(scoreForm.score) });
+      setEditingScore(null);
+      await loadReview(programId);
+      setMessage('Scorecard updated. The program average and rankings were recalculated.');
+    } catch (e) {
+      setError(e.message || 'Could not update scorecard.');
+    } finally { setSaving(false); }
+  };
+
   return (
     <section className="organizer-results">
       <div className="card">
@@ -172,7 +189,13 @@ export default function OrganizerResults({ programs }) {
                               return (
                                 <div key={judge.id} className="judge-score-item">
                                   <strong>{judge.name}:</strong>{' '}
-                                  {score ? <>{score.score}/100 ({score.grade}){score.remarks ? <small>{score.remarks}</small> : null}</> : <span className="muted">Awaiting score</span>}
+                                  {score ? <>
+                                    {score.score}/100 ({score.grade}){score.remarks ? <small>{score.remarks}</small> : null}
+                                    {!review.program.results_published && <button className="secondary" disabled={saving} onClick={() => {
+                                      setEditingScore(score);
+                                      setScoreForm({ score: String(score.score), grade: score.grade, remarks: score.remarks || '' });
+                                    }}>Edit score</button>}
+                                  </> : <span className="muted">Awaiting score</span>}
                                 </div>
                               );
                             })}
@@ -200,6 +223,24 @@ export default function OrganizerResults({ programs }) {
               </table>
             </div>
           ) : <p className="muted">No registrations for this program yet.</p>}
+          {editingScore && (
+            <form className="card" onSubmit={saveScore}>
+              <h4>Correct scorecard · {editingScore.judge_name}</h4>
+              <label>Score (0–100)</label>
+              <input type="number" min="0" max="100" step="0.5" required value={scoreForm.score}
+                onChange={e => setScoreForm(current => ({ ...current, score: e.target.value }))} />
+              <label>Grade</label>
+              <select value={scoreForm.grade} onChange={e => setScoreForm(current => ({ ...current, grade: e.target.value }))}>
+                {['A', 'B', 'C', 'D', 'F'].map(grade => <option key={grade} value={grade}>{grade}</option>)}
+              </select>
+              <label>Remarks (up to 500 characters)</label>
+              <textarea maxLength={500} rows={3} value={scoreForm.remarks}
+                onChange={e => setScoreForm(current => ({ ...current, remarks: e.target.value }))} />
+              <p className="muted small">This changes the program average and any automatic rankings. Published results must be unpublished first.</p>
+              <button disabled={saving}>{saving ? 'Saving…' : 'Save scorecard'}</button>
+              <button type="button" className="secondary" disabled={saving} onClick={() => setEditingScore(null)}>Cancel</button>
+            </form>
+          )}
         </div>
       )}
     </section>

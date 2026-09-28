@@ -139,7 +139,7 @@ router.get('/:programId/review', requireRole('organizer'), (req, res) => {
       COUNT(s.id) AS judges_submitted, AVG(s.score) AS average_score
     FROM registrations r LEFT JOIN scores s ON s.registration_id = r.id
     WHERE r.program_id = ? GROUP BY r.id ORDER BY r.code_letter, r.id`).all(program.id);
-  const scores = db.prepare(`SELECT s.registration_id, s.judge_id, u.name AS judge_name,
+  const scores = db.prepare(`SELECT s.id, s.registration_id, s.judge_id, u.name AS judge_name,
       s.score, s.grade, s.remarks, s.created_at
     FROM scores s JOIN users u ON u.id = s.judge_id
     JOIN registrations r ON r.id = s.registration_id

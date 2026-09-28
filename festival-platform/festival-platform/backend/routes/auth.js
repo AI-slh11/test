@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
-const { issueSession, requireRole, requireOrganizerOrControlAdmin, tokenFromRequest, logout } = require('../sessionAuth');
+const { issueSession, requireRole, requireOrganizerOrControlAdmin, tokenFromRequest, logout, revokeSessionsForUser } = require('../sessionAuth');
 const { hashPassword, verifyPassword } = require('../credentials');
 
 // Simple code+password login. Returns the user record (no name shown to other roles).
@@ -29,6 +29,7 @@ router.post('/password', requireRole('organizer', 'judge'), (req, res) => {
   const user = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.id);
   if (!user || !verifyPassword(current, user.password)) return res.status(400).json({ error: 'Current password is incorrect' });
   db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(next), req.user.id);
+  revokeSessionsForUser(req.user.id);
   res.json({ ok: true });
 });
 
@@ -66,7 +67,10 @@ router.patch('/judges/:id', (req, res) => {
 });
 
 router.delete('/judges/:id', (req, res) => {
-  db.prepare("DELETE FROM users WHERE id = ? AND role = 'judge'").run(req.params.id);
+  const judge = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'judge'").get(req.params.id);
+  if (!judge) return res.status(404).json({ error: 'Judge not found' });
+  revokeSessionsForUser(judge.id);
+  db.prepare("DELETE FROM users WHERE id = ? AND role = 'judge'").run(judge.id);
   res.json({ ok: true });
 });
 

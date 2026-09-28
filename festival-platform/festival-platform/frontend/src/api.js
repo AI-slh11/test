@@ -54,6 +54,7 @@ export const api = {
   setStatus: (id, status) => request(`/registrations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
   submitScore: (payload) => request('/scores', { method: 'POST', body: JSON.stringify(payload) }),
+  updateScore: (id, payload) => request(`/scores/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   scoresByJudge: (judgeId) => request(`/scores/by-judge/${judgeId}`),
 
   adminStats: () => request('/admin/stats'),
@@ -75,6 +76,5 @@ export const api = {
   results: (programId) => request(`/results/${programId}`),
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
-
 
 

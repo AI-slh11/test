@@ -55,5 +55,8 @@ function isAssignedJudge(judgeId, programId) {
 }
 
 function logout(token) { sessions.delete(token); }
+function revokeSessionsForUser(userId) {
+  for (const [token, session] of sessions) if (String(session.id) === String(userId)) sessions.delete(token);
+}
 
-module.exports = { issueSession, sessionForToken, tokenFromRequest, optionalAuth, requireAuth, requireRole, requireOrganizerOrControlAdmin, isAssignedJudge, logout };
+module.exports = { issueSession, sessionForToken, tokenFromRequest, optionalAuth, requireAuth, requireRole, requireOrganizerOrControlAdmin, isAssignedJudge, logout, revokeSessionsForUser };

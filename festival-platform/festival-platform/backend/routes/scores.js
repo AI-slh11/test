@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require('../db');
 const { requireRole, isAssignedJudge } = require('../sessionAuth');
 
-// Judge submits a score. Final once submitted - no revision endpoint exists on purpose.
+// Judges submit one score per participant; organizers can correct it before publication.
 router.post('/', requireRole('judge'), (req, res) => {
   const { registration_id, judge_id, score, grade, remarks } = req.body;
   if (registration_id == null || judge_id == null || score == null || !grade) {
@@ -44,6 +44,30 @@ router.post('/', requireRole('judge'), (req, res) => {
   });
 
   res.status(201).json({ ok: true });
+});
+
+// Organizer corrections are audited by updating the existing scorecard in place.
+router.patch('/:scoreId', requireRole('organizer'), (req, res) => {
+  const scoreId = Number(req.params.scoreId);
+  const score = Number(req.body?.score);
+  const { grade, remarks } = req.body || {};
+  if (!Number.isInteger(scoreId) || scoreId < 1) return res.status(400).json({ error: 'Invalid score ID' });
+  if (!Number.isFinite(score) || score < 0 || score > 100) return res.status(400).json({ error: 'score must be a number between 0 and 100' });
+  if (!['A', 'B', 'C', 'D', 'F'].includes(grade)) return res.status(400).json({ error: 'grade must be A, B, C, D or F' });
+  if (remarks != null && (typeof remarks !== 'string' || remarks.length > 500)) return res.status(400).json({ error: 'remarks must be text of at most 500 characters' });
+  const existing = db.prepare(`SELECT s.id, s.registration_id, s.judge_id, r.program_id, p.results_published
+    FROM scores s JOIN registrations r ON r.id = s.registration_id
+    JOIN programs p ON p.id = r.program_id WHERE s.id = ?`).get(scoreId);
+  if (!existing) return res.status(404).json({ error: 'Score not found' });
+  if (existing.results_published) return res.status(409).json({ error: 'Unpublish this program before editing scores' });
+  db.prepare('UPDATE scores SET score = ?, grade = ?, remarks = ? WHERE id = ?').run(score, grade, remarks || null, scoreId);
+  const assigned = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(existing.program_id).c;
+  const submitted = db.prepare('SELECT COUNT(*) c FROM scores WHERE registration_id = ?').get(existing.registration_id).c;
+  db.prepare('UPDATE registrations SET status = ? WHERE id = ?').run(assigned > 0 && submitted >= assigned ? 'judged' : 'slot_assigned', existing.registration_id);
+  const io = req.app.get('io');
+  io.to(`program:${existing.program_id}`).emit('score:submitted', { registration_id: existing.registration_id });
+  io.to(`judge:${existing.judge_id}`).emit('score:updated', { registration_id: existing.registration_id });
+  res.json({ ok: true });
 });
 
 // All scores a specific judge has already given (so their UI can grey those out)
