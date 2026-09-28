@@ -29,7 +29,6 @@ router.post('/password', requireRole('organizer', 'judge'), (req, res) => {
   const user = db.prepare('SELECT password FROM users WHERE id = ?').get(req.user.id);
   if (!user || !verifyPassword(current, user.password)) return res.status(400).json({ error: 'Current password is incorrect' });
   db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(next), req.user.id);
-  revokeSessionsForUser(req.user.id);
   res.json({ ok: true });
 });
 
@@ -60,6 +59,7 @@ router.patch('/judges/:id', (req, res) => {
   try {
     db.prepare('UPDATE users SET code=?, password=?, name=? WHERE id=?')
       .run(code || cur.code, password ? hashPassword(password) : cur.password, name || cur.name, cur.id);
+    if (code || password) revokeSessionsForUser(cur.id);
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: 'That judge code is already in use' });
@@ -69,8 +69,22 @@ router.patch('/judges/:id', (req, res) => {
 router.delete('/judges/:id', (req, res) => {
   const judge = db.prepare("SELECT id FROM users WHERE id = ? AND role = 'judge'").get(req.params.id);
   if (!judge) return res.status(404).json({ error: 'Judge not found' });
+  const publishedProgram = db.prepare(`SELECT p.name FROM program_judges pj JOIN programs p ON p.id = pj.program_id
+    WHERE pj.judge_id = ? AND p.results_published = 1 LIMIT 1`).get(judge.id);
+  if (publishedProgram) return res.status(409).json({ error: `Unpublish ${publishedProgram.name} before removing this judge` });
+  const affectedRegistrations = db.prepare(`SELECT DISTINCT r.id FROM registrations r
+    LEFT JOIN scores s ON s.registration_id = r.id WHERE s.judge_id = ?`).all(judge.id).map(row => row.id);
   revokeSessionsForUser(judge.id);
   db.prepare("DELETE FROM users WHERE id = ? AND role = 'judge'").run(judge.id);
+  const markJudged = db.prepare(`UPDATE registrations SET status = 'judged' WHERE id = ?
+    AND (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id) > 0
+    AND (SELECT COUNT(*) FROM scores WHERE registration_id = registrations.id) >=
+      (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id)`);
+  const reopen = db.prepare(`UPDATE registrations SET status = 'slot_assigned' WHERE id = ? AND status = 'judged'
+    AND ((SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id) = 0
+      OR (SELECT COUNT(*) FROM scores WHERE registration_id = registrations.id) <
+        (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id))`);
+  affectedRegistrations.forEach(id => { reopen.run(id); markJudged.run(id); });
   res.json({ ok: true });
 });
 

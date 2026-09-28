@@ -286,7 +286,7 @@ function JudgesTab({ judges, run, setEditing, isEditing, field, editing }) {
             <tr key={j.id}>
               <td>{j.name}</td><td>{j.code}</td><td className="muted">••••••••</td>
               <td><button onClick={() => setEditing({ kind: 'judge', id: j.id, values: { name: j.name, code: j.code, password: '' } })}>Edit</button>
-                <button className="danger" onClick={() => window.confirm(`Delete judge ${j.name}? This also removes their program assignments and submitted scores, which can change judging progress and results.`) && run(() => adminApi.deleteJudge(j.id))}>Delete</button></td>
+                <button className="danger" onClick={() => window.confirm(`Delete judge ${j.name}? This also removes their program assignments and submitted scores, which can change judging progress and results. Published programs must be unpublished first.`) && run(() => adminApi.deleteJudge(j.id))}>Delete</button></td>
             </tr>
           ))}
         </tbody>
