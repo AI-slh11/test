@@ -41,7 +41,14 @@ export default function JudgePortal() {
       if (String(payload.program_id) !== String(activeProgram)) return;
       setList(prev => [...prev, payload]);
     };
-    const onScore = () => api.judgeView(activeProgram).then(setList).catch(() => {});
+    const onScore = () => {
+      api.judgeView(activeProgram).then(setList).catch(() => {});
+      api.scoresByJudge(user.id).then(rows => {
+        const map = {};
+        rows.forEach(row => { map[row.registration_id] = row; });
+        setMyScores(map);
+      }).catch(() => {});
+    };
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
 

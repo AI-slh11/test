@@ -61,12 +61,8 @@ router.patch('/:scoreId', requireRole('organizer'), (req, res) => {
   if (!existing) return res.status(404).json({ error: 'Score not found' });
   if (existing.results_published) return res.status(409).json({ error: 'Unpublish this program before editing scores' });
   db.prepare('UPDATE scores SET score = ?, grade = ?, remarks = ? WHERE id = ?').run(score, grade, remarks || null, scoreId);
-  const assigned = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(existing.program_id).c;
-  const submitted = db.prepare('SELECT COUNT(*) c FROM scores WHERE registration_id = ?').get(existing.registration_id).c;
-  db.prepare('UPDATE registrations SET status = ? WHERE id = ?').run(assigned > 0 && submitted >= assigned ? 'judged' : 'slot_assigned', existing.registration_id);
   const io = req.app.get('io');
   io.to(`program:${existing.program_id}`).emit('score:submitted', { registration_id: existing.registration_id });
-  io.to(`judge:${existing.judge_id}`).emit('score:updated', { registration_id: existing.registration_id });
   res.json({ ok: true });
 });
 
