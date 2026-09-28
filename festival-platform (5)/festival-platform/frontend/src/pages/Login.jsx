@@ -1,0 +1,39 @@
+import React, { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { api } from '../api.js';
+import { useAuth } from '../App.jsx';
+
+export default function Login() {
+  const [code, setCode] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const { login } = useAuth();
+  const navigate = useNavigate();
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError('');
+    try {
+      const { user } = await api.login(code, password);
+      login(user);
+      navigate(user.role === 'organizer' ? '/green-room' : '/judge');
+    } catch (err) {
+      setError(err.message);
+    }
+  };
+
+  return (
+    <div className="card narrow">
+      <h2>Organizer / Judge Login</h2>
+      <p className="muted">Default seed accounts: ORG-001 / organizer123, JUDGE-2024-001 / judge123</p>
+      <form onSubmit={submit}>
+        <label>Login Code</label>
+        <input value={code} onChange={e => setCode(e.target.value)} placeholder="ORG-001 or JUDGE-2024-001" required />
+        <label>Password</label>
+        <input type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+        {error && <p className="error">{error}</p>}
+        <button type="submit">Log in</button>
+      </form>
+    </div>
+  );
+}
