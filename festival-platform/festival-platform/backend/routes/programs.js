@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { optionalAuth, requireRole, requireOrganizerOrControlAdmin } = require('../sessionAuth');
-const { assignmentConflict } = require('../judgeAssignments');
+const { assignmentConflict, assignmentConflictForSlot } = require('../judgeAssignments');
 
 const CATEGORIES = ['premier', 'junior'];
 const FIRST_NUMBER = { premier: 28, junior: 96 };
@@ -60,11 +60,17 @@ router.post('/', (req, res) => {
   }
   const progCode = (code || `${category === 'premier' ? 'P' : 'J'}${number}`).toUpperCase();
   const q = quota ? Number(quota) : null;
+  const judgeIds = [...new Set(Array.isArray(judge_ids) ? judge_ids.map(Number) : [])];
+  if (judgeIds.some(id => !Number.isInteger(id) || id < 1)) return res.status(400).json({ error: 'Select valid judges' });
+  for (const judgeId of judgeIds) {
+    const conflict = assignmentConflictForSlot(judgeId, time_slot);
+    if (conflict) return res.status(409).json({ error: conflict });
+  }
   const create = db.transaction(() => {
     const info = db.prepare(
       'INSERT INTO programs (name, code, type, language, time_slot, quota, category, number) VALUES (?,?,?,?,?,?,?,?)'
     ).run(name.trim(), progCode, progType, language || null, time_slot || null, q, category, number);
-    for (const jid of Array.isArray(judge_ids) ? judge_ids : []) {
+    for (const jid of judgeIds) {
       db.prepare('INSERT OR IGNORE INTO program_judges (program_id, judge_id) VALUES (?,?)').run(info.lastInsertRowid, jid);
     }
     return info.lastInsertRowid;
@@ -109,10 +115,16 @@ router.patch('/:id', (req, res) => {
     return res.status(409).json({ error: `Program number ${number} already exists in ${category}` });
   }
   const quota = 'quota' in b ? (b.quota ? Number(b.quota) : null) : cur.quota;
+  const nextTimeSlot = 'time_slot' in b ? (b.time_slot || null) : cur.time_slot;
+  const assignedJudges = db.prepare('SELECT judge_id FROM program_judges WHERE program_id = ?').all(cur.id);
+  for (const { judge_id: judgeId } of assignedJudges) {
+    const conflict = assignmentConflictForSlot(judgeId, nextTimeSlot, cur.id);
+    if (conflict) return res.status(409).json({ error: conflict });
+  }
   db.prepare('UPDATE programs SET name=?, code=?, type=?, language=?, time_slot=?, quota=?, category=?, number=? WHERE id=?').run(
     b.name ?? cur.name, (b.code ?? cur.code).toUpperCase(), type,
     'language' in b ? (b.language || null) : cur.language,
-    'time_slot' in b ? (b.time_slot || null) : cur.time_slot, quota, category, number, cur.id);
+    nextTimeSlot, quota, category, number, cur.id);
   res.json({ ok: true });
 });
 
