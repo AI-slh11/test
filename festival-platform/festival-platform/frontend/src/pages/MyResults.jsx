@@ -1,0 +1,97 @@
+import React, { useState } from 'react';
+import { api } from '../api.js';
+import { programLabel } from '../categories.js';
+import TeamBadge from '../TeamBadge.jsx';
+
+const places = { 1: '1st Place', 2: '2nd Place', 3: '3rd Place' };
+const statusLabels = {
+  registered: 'Registered',
+  submission_received: 'Submission received',
+  slot_assigned: 'Slot assigned',
+  judged: 'Judging complete',
+  results_announced: 'Results published'
+};
+
+export default function MyResults() {
+  const [studentId, setStudentId] = useState('');
+  const [registrations, setRegistrations] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const lookup = async (event) => {
+    event.preventDefault();
+    setLoading(true);
+    setError('');
+    setRegistrations(null);
+    try {
+      const data = await api.studentRegistrations(studentId);
+      setRegistrations(data.registrations);
+    } catch (err) {
+      setError(err.message || 'Could not look up your programs. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <section className="student-results-page">
+      <div className="card narrow">
+        <h2>My Programs &amp; Results</h2>
+        <p className="muted">Enter the Student ID you used when registering to see your programs and published results.</p>
+        <form onSubmit={lookup}>
+          <label htmlFor="student-results-id">Student ID</label>
+          <input
+            id="student-results-id"
+            value={studentId}
+            onChange={event => setStudentId(event.target.value.toUpperCase())}
+            placeholder="e.g. 2023CSE001"
+            autoComplete="off"
+            autoCapitalize="characters"
+            autoCorrect="off"
+            spellCheck={false}
+            pattern="\d{4}[A-Za-z]{2,3}\d{3}"
+            title="Enter 4 digits, 2–3 letters, and 3 digits"
+            maxLength={10}
+            required
+          />
+          <p className="muted small">Use the same ID you entered on the registration form.</p>
+          {error && <p className="error" role="alert">{error}</p>}
+          <button type="submit" disabled={loading}>{loading ? 'Searching…' : 'Find my programs'}</button>
+        </form>
+      </div>
+
+      {registrations && (
+        <div className="student-results-list" aria-live="polite">
+          {registrations.length === 0 ? (
+            <div className="card student-results-empty">
+              <h3>No registrations found</h3>
+              <p className="muted">Check the Student ID and try again. It must match the ID used during registration.</p>
+            </div>
+          ) : registrations.map(item => (
+            <article className="card student-result-card" key={item.participant_id}>
+              <div className="student-result-heading">
+                <div>
+                  <h3>{programLabel(item.program)}</h3>
+                  <p className="muted">{item.program.type === 'writing' ? 'Writing' : 'Stage'} program</p>
+                </div>
+                <TeamBadge name={item.team_name} />
+              </div>
+              <p><strong>Participant ID:</strong> {item.participant_id}</p>
+              <p><strong>Registration:</strong> {statusLabels[item.registration_status] || 'Registered'}</p>
+              {item.results_published ? (
+                item.result ? (
+                  <div className="student-final-result">
+                    <strong>{places[item.result.rank] || `Rank ${item.result.rank}`}</strong>
+                    <span>Average score: {item.result.average_score ?? '—'}</span>
+                  </div>
+                ) : <p className="muted">Results are published, but no final score is available for this entry.</p>
+              ) : <p className="muted">Final results have not been published yet.</p>}
+            </article>
+          ))}
+        </div>
+      )}
+      <p className="muted small student-results-privacy">For privacy, enter your own Student ID. Individual judge scorecards are not shown here.</p>
+    </section>
+  );
+}
+

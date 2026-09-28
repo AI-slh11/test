@@ -54,6 +54,9 @@ export const api = {
   deleteRegistration: (id) => request(`/registrations/${id}`, { method: 'DELETE' }),
 
   publicFeed: () => request('/results/public/feed'),
+  studentRegistrations: (studentId) => request('/results/student-lookup', {
+    method: 'POST', body: JSON.stringify({ student_id: studentId.trim().toUpperCase() })
+  }),
   setPublished: (programId, published) => request(`/programs/${programId}/published`, { method: 'PATCH', body: JSON.stringify({ published }) }),
 
   reviewResults: (programId) => request(`/results/${programId}/review`),
@@ -61,4 +64,5 @@ export const api = {
   results: (programId) => request(`/results/${programId}`),
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
+
 

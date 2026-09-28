@@ -5,6 +5,7 @@ const PDFDocument = require('pdfkit');
 
 const { TEAMS, PLACE_POINTS } = require('../teams');
 const { requireRole } = require('../sessionAuth');
+const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 
 // Ranked results for one program. Judge-by-judge details are only returned by
 // the organizer-only review endpoint below.
@@ -80,6 +81,50 @@ function buildPublicFeed() {
 
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
 router.get('/public/feed', (req, res) => res.json(buildPublicFeed()));
+
+// Student self-service lookup. Only published final results are disclosed; judge
+// scorecards and unpublished rankings remain private to the organizer.
+router.post('/student-lookup', (req, res) => {
+  const studentId = String(req.body?.student_id || '').trim().toUpperCase();
+  if (!STUDENT_ID_RE.test(studentId)) {
+    return res.status(400).json({ error: 'Enter a valid Student ID (for example, 2023CSE001)' });
+  }
+
+  const registrations = db.prepare(`SELECT r.id AS registration_id, r.participant_id, r.code_letter,
+      r.status, r.team_name, p.id AS program_id, p.name AS program_name, p.category,
+      p.number, p.type, p.results_published
+    FROM registrations r JOIN programs p ON p.id = r.program_id
+    WHERE r.student_id = ? ORDER BY p.category, p.number, p.name`).all(studentId);
+  const rankingsByProgram = new Map();
+
+  res.json({ registrations: registrations.map(registration => {
+    let result = null;
+    if (registration.results_published) {
+      if (!rankingsByProgram.has(registration.program_id)) {
+        rankingsByProgram.set(registration.program_id, computeRankings(registration.program_id).ranked);
+      }
+      const ranked = rankingsByProgram.get(registration.program_id)
+        .find(item => item.registration_id === registration.registration_id);
+      if (ranked) result = { rank: ranked.rank, average_score: ranked.average_score };
+    }
+
+    return {
+      participant_id: registration.participant_id,
+      code_letter: registration.code_letter,
+      registration_status: registration.status,
+      team_name: registration.team_name,
+      program: {
+        id: registration.program_id,
+        name: registration.program_name,
+        category: registration.category,
+        number: registration.number,
+        type: registration.type
+      },
+      results_published: !!registration.results_published,
+      result
+    };
+  }) });
+});
 
 // Organizer-only review includes each submitted judge score and registration identity.
 router.get('/:programId/review', requireRole('organizer'), (req, res) => {
@@ -194,4 +239,5 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
 });
 
 module.exports = router;
+
 
