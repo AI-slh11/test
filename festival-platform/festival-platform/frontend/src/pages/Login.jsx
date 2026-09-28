@@ -7,6 +7,13 @@ export default function Login() {
   const [code, setCode] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [notice] = useState(() => {
+    try {
+      const message = sessionStorage.getItem('festival_login_notice') || '';
+      sessionStorage.removeItem('festival_login_notice');
+      return message;
+    } catch { return ''; }
+  });
   const { login } = useAuth();
   const navigate = useNavigate();
 
@@ -25,6 +32,7 @@ export default function Login() {
   return (
     <div className="card narrow">
       <h2>Organizer / Judge Login</h2>
+      {notice && <p className="muted" role="status">{notice}</p>}
       <form onSubmit={submit}>
         <label>Login Code</label>
         <input value={code} onChange={e => setCode(e.target.value)} placeholder="ORG-001 or JUDGE-2024-001" autoComplete="username" autoCapitalize="characters" autoCorrect="off" spellCheck={false} required />
@@ -36,4 +44,5 @@ export default function Login() {
     </div>
   );
 }
+
 

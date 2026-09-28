@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Routes, Route, Link, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import Login from './pages/Login.jsx';
 import Register from './pages/Register.jsx';
@@ -29,6 +29,7 @@ function AuthProvider({ children }) {
   const login = (u, token) => {
     setUser(u);
     localStorage.setItem('festival_user', JSON.stringify(u));
+    try { sessionStorage.removeItem('festival_login_notice'); } catch {}
     setAuthToken(token);
     socket.disconnect();
     socket.connect();
@@ -41,6 +42,20 @@ function AuthProvider({ children }) {
     socket.disconnect();
     socket.connect();
   };
+  useEffect(() => {
+    const handleExpiredSession = () => {
+      setUser(null);
+      try {
+        localStorage.removeItem('festival_user');
+        sessionStorage.setItem('festival_login_notice', 'Your session expired. Please sign in again.');
+      } catch {}
+      clearAuthToken();
+      socket.disconnect();
+      socket.connect();
+    };
+    window.addEventListener('festival:session-expired', handleExpiredSession);
+    return () => window.removeEventListener('festival:session-expired', handleExpiredSession);
+  }, []);
   return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
 }
 
@@ -105,4 +120,5 @@ export default function App() {
     </AuthProvider>
   );
 }
+
 

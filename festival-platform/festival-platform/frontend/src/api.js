@@ -2,9 +2,10 @@
 // VITE_API_BASE setting. Explicit environment configuration still takes priority.
 const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : 'https://test-t24x.onrender.com/api');
 const TOKEN_KEY = 'festival_auth_token';
+let sessionExpiredNotified = false;
 
 export const getAuthToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
-export const setAuthToken = (token) => { try { localStorage.setItem(TOKEN_KEY, token); } catch {} };
+export const setAuthToken = (token) => { sessionExpiredNotified = false; try { localStorage.setItem(TOKEN_KEY, token); } catch {} };
 export const clearAuthToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} };
 
 async function request(path, options = {}) {
@@ -20,7 +21,17 @@ async function request(path, options = {}) {
   let data;
   try { data = await res.json(); }
   catch { throw new Error("Can't reach the festival server (got an unexpected response). Check VITE_API_BASE."); }
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (!res.ok) {
+    if (res.status === 401 && path !== '/auth/login') {
+      clearAuthToken();
+      try { localStorage.removeItem('festival_user'); } catch {}
+      if (!sessionExpiredNotified) {
+        sessionExpiredNotified = true;
+        window.dispatchEvent(new Event('festival:session-expired'));
+      }
+    }
+    throw new Error(data.error || 'Request failed');
+  }
   return data;
 }
 
@@ -64,5 +75,6 @@ export const api = {
   results: (programId) => request(`/results/${programId}`),
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
+
 
 
