@@ -1,9 +1,19 @@
-const BASE = import.meta.env.VITE_API_BASE || '/api';
+const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '');
+const TOKEN_KEY = 'festival_auth_token';
+
+export const getAuthToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
+export const setAuthToken = (token) => { try { localStorage.setItem(TOKEN_KEY, token); } catch {} };
+export const clearAuthToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} };
 
 async function request(path, options = {}) {
+  if (!BASE) throw new Error('Set VITE_API_BASE to the deployed backend URL before building this frontend.');
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}),
+      ...(options.headers || {})
+    }
   });
   let data;
   try { data = await res.json(); }
@@ -14,6 +24,8 @@ async function request(path, options = {}) {
 
 export const api = {
   login: (code, password) => request('/auth/login', { method: 'POST', body: JSON.stringify({ code, password }) }),
+  logout: () => request('/auth/logout', { method: 'POST' }),
+  changePassword: (current, next) => request('/auth/password', { method: 'POST', body: JSON.stringify({ current, next }) }),
   listJudges: () => request('/auth/judges'),
   createJudge: (payload) => request('/auth/judges', { method: 'POST', body: JSON.stringify(payload) }),
 
@@ -40,7 +52,6 @@ export const api = {
   deleteRegistration: (id) => request(`/registrations/${id}`, { method: 'DELETE' }),
 
   publicFeed: () => request('/results/public/feed'),
-  publishResults: (programId, judgeId) => request(`/results/${programId}/publish`, { method: 'POST', body: JSON.stringify({ judge_id: judgeId }) }),
   setPublished: (programId, published) => request(`/programs/${programId}/published`, { method: 'PATCH', body: JSON.stringify({ published }) }),
 
   results: (programId) => request(`/results/${programId}`),

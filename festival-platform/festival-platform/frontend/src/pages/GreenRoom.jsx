@@ -136,7 +136,7 @@ export default function GreenRoom() {
                       <td>{r.average_score}</td>
                       <td>{r.judges_submitted}</td>
                       <td>{r.rank <= 3
-                        ? <a href={api.certificateUrl(activeProgram, r.registration_id)}>Download</a>
+                        ? (program.results_published ? <a href={api.certificateUrl(activeProgram, r.registration_id)}>Download</a> : 'Available after publication')
                         : '—'}</td>
                     </tr>
                   ))}

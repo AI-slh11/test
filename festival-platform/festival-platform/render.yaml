@@ -7,9 +7,19 @@ services:
     dockerContext: ./backend
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_ENV
+        value: production
       - key: FRONTEND_ORIGIN
         sync: false
       - key: ADMIN_CODE
         sync: false
       - key: ADMIN_PASSWORD
+        sync: false
+      - key: SEED_ORGANIZER_PASSWORD
+        sync: false
+      - key: SEED_JUDGE_1_PASSWORD
+        sync: false
+      - key: SEED_JUDGE_2_PASSWORD
+        sync: false
+      - key: SEED_JUDGE_3_PASSWORD
         sync: false

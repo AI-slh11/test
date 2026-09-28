@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
+import PasswordChange from '../PasswordChange.jsx';
 
 const TABS = ['Overview', 'Programs', 'Judges', 'Registrations'];
 
@@ -201,6 +202,7 @@ export default function AdminDashboard() {
           </table>
         </div>
       )}
+      <PasswordChange />
     </div>
   );
 }

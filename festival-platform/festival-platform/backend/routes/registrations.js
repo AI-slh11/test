@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { TEAMS } = require('../teams');
+const { requireRole, requireOrganizerOrControlAdmin, isAssignedJudge } = require('../sessionAuth');
 
 // 4 digits + 2-3 letters + 3 digits, e.g. 2023CSE001
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
@@ -76,7 +77,7 @@ router.post('/', (req, res) => {
 });
 
 // Organizer / full view: includes student name & ID
-router.get('/', (req, res) => {
+router.get('/', requireOrganizerOrControlAdmin, (req, res) => {
   const { program_id } = req.query;
   const rows = program_id
     ? db.prepare('SELECT * FROM registrations WHERE program_id = ? ORDER BY created_at ASC').all(program_id)
@@ -85,9 +86,10 @@ router.get('/', (req, res) => {
 });
 
 // Judge view: anonymized - code letter + status only, no student name/ID
-router.get('/judge-view', (req, res) => {
+router.get('/judge-view', requireRole('judge'), (req, res) => {
   const { program_id } = req.query;
   if (!program_id) return res.status(400).json({ error: 'program_id required' });
+  if (!isAssignedJudge(req.user.id, program_id)) return res.status(403).json({ error: 'You are not assigned to this program' });
   const rows = db.prepare(`
     SELECT id, program_id, code_letter, participant_id, is_team, status, created_at
     FROM registrations WHERE program_id = ? ORDER BY created_at ASC
@@ -95,7 +97,7 @@ router.get('/judge-view', (req, res) => {
   res.json(rows);
 });
 
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', requireOrganizerOrControlAdmin, (req, res) => {
   const { status } = req.body;
   const valid = ['registered', 'submission_received', 'slot_assigned', 'judged', 'results_announced'];
   if (!valid.includes(status)) return res.status(400).json({ error: 'invalid status' });
@@ -104,7 +106,7 @@ router.patch('/:id/status', (req, res) => {
 });
 
 // Admin: edit a registration's details (code letter / participant ID stay fixed)
-router.patch('/:id', (req, res) => {
+router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const cur = db.prepare('SELECT * FROM registrations WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Registration not found' });
   const b = req.body;
@@ -125,7 +127,7 @@ router.patch('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-router.delete('/:id', (req, res) => {
+router.delete('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const cur = db.prepare('SELECT program_id FROM registrations WHERE id = ?').get(req.params.id);
   db.prepare('DELETE FROM registrations WHERE id = ?').run(req.params.id);
   if (cur) req.app.get('io').to(`program:${cur.program_id}`).emit('score:submitted', {});

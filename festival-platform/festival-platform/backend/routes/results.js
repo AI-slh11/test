@@ -4,6 +4,7 @@ const db = require('../db');
 const PDFDocument = require('pdfkit');
 
 const { TEAMS, PLACE_POINTS } = require('../teams');
+const { requireRole } = require('../sessionAuth');
 
 // Ranked results for one program. Only the final AVERAGED score is exposed -
 // individual judge scores stay internal to the scores table (confidential).
@@ -70,44 +71,23 @@ function buildPublicFeed() {
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
 router.get('/public/feed', (req, res) => res.json(buildPublicFeed()));
 
-// A judge assigned to the program publishes its results once every participant
-// has been scored by every judge on the panel.
-router.post('/:programId/publish', (req, res) => {
-  const { programId } = req.params;
-  const judgeId = req.body.judge_id;
-  const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
+// Unpublished standings are available to organizers for review only.
+router.get('/:programId', requireRole('organizer'), (req, res) => {
+  const program = db.prepare('SELECT id FROM programs WHERE id = ?').get(req.params.programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
-
-  const assigned = db.prepare('SELECT 1 FROM program_judges WHERE program_id = ? AND judge_id = ?').get(programId, judgeId);
-  if (!assigned) return res.status(403).json({ error: 'Only a judge assigned to this program can publish its results' });
-  if (program.results_published) return res.json({ ok: true, already: true });
-
-  const regs = db.prepare('SELECT status FROM registrations WHERE program_id = ?').all(programId);
-  if (regs.length === 0) return res.status(409).json({ error: 'No participants registered for this program' });
-  const pending = regs.filter(r => r.status !== 'judged').length;
-  if (pending > 0) {
-    return res.status(409).json({ error: `${pending} participant(s) still need scores from every judge` });
-  }
-
-  db.prepare("UPDATE programs SET results_published = 1, published_at = datetime('now') WHERE id = ?").run(programId);
-  db.prepare("UPDATE registrations SET status = 'results_announced' WHERE program_id = ? AND status = 'judged'").run(programId);
-  req.app.get('io').emit('results:published', { program_id: Number(programId) });
-  res.json({ ok: true });
-});
-
-// Organizer / judge view: averaged scores, no names.
-router.get('/:programId', (req, res) => {
   res.json(computeRankings(req.params.programId));
 });
 
 // Certificate PDF for a placed participant (1st/2nd/3rd). Streams a simple generated PDF.
-router.get('/:programId/certificate/:registrationId', (req, res) => {
+router.get('/:programId/certificate/:registrationId', requireRole('organizer'), (req, res) => {
   const { programId, registrationId } = req.params;
+  const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
+  if (!program) return res.status(404).json({ error: 'Program not found' });
+  if (!program.results_published) return res.status(403).json({ error: 'Certificates are available after results are published' });
   const { ranked } = computeRankings(programId);
   const entry = ranked.find(r => String(r.registration_id) === String(registrationId));
   if (!entry || entry.rank > 3) return res.status(404).json({ error: 'No certificate available (not placed 1st-3rd)' });
 
-  const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
   const placeLabel = { 1: '1st Place', 2: '2nd Place', 3: '3rd Place' }[entry.rank];
 
   res.setHeader('Content-Type', 'application/pdf');

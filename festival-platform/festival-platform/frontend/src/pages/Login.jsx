@@ -14,8 +14,8 @@ export default function Login() {
     e.preventDefault();
     setError('');
     try {
-      const { user } = await api.login(code, password);
-      login(user);
+      const { user, token } = await api.login(code, password);
+      login(user, token);
       navigate(user.role === 'organizer' ? '/green-room' : '/judge');
     } catch (err) {
       setError(err.message);

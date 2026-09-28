@@ -95,13 +95,13 @@ npm run dev         # http://localhost:5173, proxies /api to :4000
 2. Organizer assigns judges to each program from **Green Room**.
 3. Students self-register online at `/register`, or organizer adds them on-site from **Green Room** — both get a Code Letter + Participant ID instantly.
 4. Judge logs in, opens **Judge Portal**, selects the program — sees the anonymized, live-updating list and scores whoever they pick.
-5. **Leaderboard** updates in real time as scores land; once all assigned judges have scored a participant, their status flips to "judged" and their average appears in the rankings.
-6. Organizer downloads 1st/2nd/3rd place certificates from Green Room's results table.
+5. Once every assigned judge has scored each participant, organizers can review averages privately in the Green Room.
+6. An organizer explicitly publishes the completed results from **Dashboard → Programs**. Only then do they appear on the home page and leaderboard, and certificates become available.
 
 ## Teams, publishing & live results (added)
 
 - **Two teams:** every registration picks **Team 1 – Aliora** or **Team 2 – Nexiora** (required, online and on-site). Judges never see the team or name while scoring.
-- **Publishing:** once every participant in a program has been scored by every assigned judge, any assigned judge can press **Publish results** in the Judge Portal (the organizer can also publish/unpublish from *Dashboard → Programs*).
+- **Publishing:** judges only submit scores. Organizers review results privately, then publish or unpublish from *Dashboard → Programs*. The API rejects publishing until every participant has a score from every currently assigned judge.
 - **Live on the home page:** published results appear right under the hero and update by themselves over Socket.IO (with a 30-second refresh as a fallback). The `/leaderboard` page shows every published program.
 - **Team points:** 1st = 5, 2nd = 3, 3rd = 1 for the winner's team (edit `backend/teams.js`). Equal scores share a place. Winners (top 3) are shown by name; everyone else by code letter only.
 - **Student ID:** 4 digits + 2–3 letters + 3 digits (e.g. `2023CSE001`), validated on the form and on the server. Valid IDs register instantly.
@@ -109,12 +109,24 @@ npm run dev         # http://localhost:5173, proxies /api to :4000
 
 Seeded judges: `JUDGE-2024-001`, `-002`, `-003` (password `judge123`). Change all default passwords before going live.
 
-## Notes / next steps for production hardening
+## Security and deployment notes
 
-- Auth is intentionally minimal (plaintext password match, no JWT/session) to keep the MVP simple to run locally — add bcrypt hashing + JWT/session cookies before any real deployment.
+- Organizer and judge APIs require server-checked bearer sessions. Passwords are stored as scrypt hashes; existing plaintext user passwords are upgraded automatically at startup. Sessions last 8 hours and are kept in memory, so signing in again is required after a backend restart.
+- The seeded local accounts use published demo passwords. Change them before public use. The Control Room has a separate admin login; set `ADMIN_CODE` and `ADMIN_PASSWORD`.
 - Writing-competition file uploads (essays/stories) aren't wired up yet — `submission_file` exists in the schema as a placeholder; add multer + file storage when ready.
-- better-sqlite3 is fine for a single-server festival deployment; swap to Postgres if you need multiple backend instances.
-- Add rate limiting / input sanitization before exposing the public registration form to the internet.
+- Run one persistent backend instance with durable storage for its SQLite database. This app uses Socket.IO and `better-sqlite3`; a static Vercel deployment alone cannot run the backend or preserve its database. Set the Vercel project's root directory to `frontend`, set `VITE_API_BASE` to `https://YOUR_BACKEND/api`, and set `VITE_SOCKET_URL` to `https://YOUR_BACKEND` before building. If the API base is missing in a production build, API calls show a clear configuration error instead of silently receiving the SPA HTML page.
+- Set `FRONTEND_ORIGIN` on the backend to the exact Vercel site origin (for example `https://your-site.vercel.app`) to restrict API and Socket.IO browser origins. Set `NODE_ENV=production`, `ADMIN_CODE`, `ADMIN_PASSWORD`, and strong unique values for `SEED_ORGANIZER_PASSWORD` and `SEED_JUDGE_1_PASSWORD` through `SEED_JUDGE_3_PASSWORD`. Production refuses to start without secure seed passwords; local development keeps its convenience defaults.
+- Render Free has an ephemeral filesystem. This project's SQLite registrations, assignments, and scores can be lost when a free service sleeps, restarts, or redeploys. Use the free plan only for demos unless you have an external persistent database solution.
+
+### Deploying the frontend to Vercel
+
+1. Push this project to a GitHub repository.
+2. Import that repository in Vercel and set **Root Directory** to `frontend`.
+3. Add `VITE_API_BASE=https://YOUR_BACKEND/api` and `VITE_SOCKET_URL=https://YOUR_BACKEND` as Vercel environment variables, then deploy. Use the public HTTPS URL of the backend host; do not use `localhost`.
+4. On the persistent backend host, deploy the `backend/Dockerfile` or run `node server.js` with Node.js 20+, keep `/app/data` on persistent storage when using Docker, and set `FRONTEND_ORIGIN` to the Vercel site URL. Configure `ADMIN_CODE` and `ADMIN_PASSWORD` there as well.
+5. After both services are deployed, redeploy the Vercel frontend if you changed its environment variables. Change the seeded organizer and judge passwords in the app before inviting users.
+
+The frontend build can be hosted on Vercel, but the backend must remain on a persistent host that supports a long-running Node process and Socket.IO. The included Docker Compose setup runs both locally.
 
 ## Premier & Junior categories
 
@@ -137,7 +149,6 @@ A separate admin dashboard, not linked anywhere on the site and hidden from the 
   assign judges, publish / unpublish results, manage judge accounts, edit or delete registrations, see counts
   per category and team, and change the admin password.
 
-> The older organizer routes (Green Room, Programs page) are unchanged and still unauthenticated on the API
-> side, as in the original MVP. Only the Control Room is token-protected.
+> The legacy organizer pages and the Control Room both require server-side authorization. Public registration and the published-results feed remain available without a login.
 
 Docker: `ADMIN_CODE=boss ADMIN_PASSWORD='choose-a-strong-one' docker compose up --build`

@@ -1,0 +1,17 @@
+name: Keep Render free service awake
+
+on:
+  schedule:
+    - cron: "3,13,23,33,43,53 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  keep-alive:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Ping the API health endpoint
+        run: curl --fail --silent --show-error --retry 8 --retry-all-errors --retry-delay 5 --max-time 120 https://test-t24x.onrender.com/api/health

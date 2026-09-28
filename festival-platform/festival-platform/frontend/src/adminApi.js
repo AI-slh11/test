@@ -1,6 +1,6 @@
 // Client for the hidden admin API (/api/control/*). Token lives in sessionStorage only,
 // so closing the tab signs the admin out.
-const BASE = import.meta.env.VITE_API_BASE || '/api';
+const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '');
 export const ADMIN_PATH = import.meta.env.VITE_ADMIN_PATH || '/control-room';
 const KEY = 'festival_admin_token';
 
@@ -9,6 +9,7 @@ export const setToken = (t) => { try { sessionStorage.setItem(KEY, t); } catch {
 export const clearToken = () => { try { sessionStorage.removeItem(KEY); } catch {} };
 
 async function request(path, options = {}) {
+  if (!BASE) throw new Error('Set VITE_API_BASE to the deployed backend URL before building this frontend.');
   const token = getToken();
   const res = await fetch(`${BASE}/control${path}`, {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },

@@ -6,7 +6,11 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/api': process.env.VITE_API_PROXY || 'http://localhost:4000'
+      '/api': process.env.VITE_API_PROXY || 'http://localhost:4000',
+      '/socket.io': {
+        target: process.env.VITE_API_PROXY || 'http://localhost:4000',
+        ws: true
+      }
     }
   }
 });

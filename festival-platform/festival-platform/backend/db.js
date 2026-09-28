@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const { hashPassword, verifyPassword, PREFIX } = require('./credentials');
 
 const db = new Database(path.join(__dirname, 'data', 'festival.db'));
 db.pragma('journal_mode = WAL');
@@ -87,17 +88,49 @@ db.exec(`CREATE TABLE IF NOT EXISTS admins (
   created_at TEXT DEFAULT (datetime('now'))
 )`);
 
-// Seed a default organizer + a couple of judges on first run so the app is usable immediately.
+// Seed usable accounts. Production must supply private passwords through environment
+// variables; the familiar development-only credentials are never accepted there.
+const seedAccounts = [
+  { code: 'ORG-001', passwordKey: 'SEED_ORGANIZER_PASSWORD', fallback: 'organizer123', name: 'Festival Organizer', role: 'organizer' },
+  { code: 'JUDGE-2024-001', passwordKey: 'SEED_JUDGE_1_PASSWORD', fallback: 'judge123', name: 'Judge One', role: 'judge' },
+  { code: 'JUDGE-2024-002', passwordKey: 'SEED_JUDGE_2_PASSWORD', fallback: 'judge123', name: 'Judge Two', role: 'judge' },
+  { code: 'JUDGE-2024-003', passwordKey: 'SEED_JUDGE_3_PASSWORD', fallback: 'judge123', name: 'Judge Three', role: 'judge' }
+];
+const production = process.env.NODE_ENV === 'production';
+if (production) {
+  const missing = seedAccounts.filter(account => !process.env[account.passwordKey]).map(account => account.passwordKey);
+  if (missing.length) throw new Error(`Production account passwords are missing: ${missing.join(', ')}`);
+}
+
 const userCount = db.prepare('SELECT COUNT(*) c FROM users').get().c;
 if (userCount === 0) {
   const insert = db.prepare('INSERT INTO users (code, password, name, role) VALUES (?,?,?,?)');
-  insert.run('ORG-001', 'organizer123', 'Festival Organizer', 'organizer');
-  insert.run('JUDGE-2024-001', 'judge123', 'Judge One', 'judge');
-  insert.run('JUDGE-2024-002', 'judge123', 'Judge Two', 'judge');
+  for (const account of seedAccounts) {
+    const password = process.env[account.passwordKey] || account.fallback;
+    insert.run(account.code, hashPassword(password), account.name, account.role);
+  }
+} else {
+  // Rotate the credentials from earlier seeded releases exactly when they still match
+  // the public development defaults; preserve any organizer- or judge-changed password.
+  for (const account of seedAccounts) {
+    const password = process.env[account.passwordKey];
+    if (!password) continue;
+    const row = db.prepare('SELECT id, password FROM users WHERE code = ?').get(account.code);
+    if (row && (row.password === account.fallback || verifyPassword(account.fallback, row.password))) {
+      db.prepare('UPDATE users SET password = ? WHERE id = ?').run(hashPassword(password), row.id);
+    }
+  }
+  const third = seedAccounts[3];
+  db.prepare('INSERT OR IGNORE INTO users (code, password, name, role) VALUES (?,?,?,?)')
+    .run(third.code, hashPassword(process.env[third.passwordKey] || third.fallback), third.name, third.role);
 }
 
-// Panels are 2-3 judges; make sure a third judge account exists (safe on existing DBs)
-db.prepare("INSERT OR IGNORE INTO users (code, password, name, role) VALUES ('JUDGE-2024-003','judge123','Judge Three','judge')").run();
+// Upgrade legacy plaintext user passwords on existing installations.
+const passwordRows = db.prepare('SELECT id, password FROM users').all();
+const savePassword = db.prepare('UPDATE users SET password = ? WHERE id = ?');
+for (const row of passwordRows) {
+  if (!row.password.startsWith(PREFIX)) savePassword.run(hashPassword(row.password), row.id);
+}
 
 // Seed the official Premier / Junior program lists (once)
 require('./programSeed').seedPrograms(db);

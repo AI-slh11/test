@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const { TEAMS } = require('../teams');
+const { requireOrganizerOrControlAdmin } = require('../sessionAuth');
+
+router.use(requireOrganizerOrControlAdmin);
 
 // Organizer dashboard: counts for everything. Only counts are exposed here —
 // individual judge scores stay confidential.

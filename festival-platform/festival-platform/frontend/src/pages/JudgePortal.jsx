@@ -3,6 +3,7 @@ import { programLabel } from '../categories.js';
 import { api } from '../api.js';
 import { socket } from '../socket.js';
 import { useAuth } from '../App.jsx';
+import PasswordChange from '../PasswordChange.jsx';
 
 const STATUS_LABEL = {
   registered: '🆕 NEW', submission_received: '⏳ PENDING',
@@ -19,13 +20,10 @@ export default function JudgePortal() {
   const [scoreForm, setScoreForm] = useState({ score: '', grade: 'A', remarks: '' });
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(socket.connected);
-  const [publishedIds, setPublishedIds] = useState(new Set());
-  const [publishMsg, setPublishMsg] = useState('');
 
   useEffect(() => {
     api.programsForJudge(user.id).then(ps => {
       setPrograms(ps);
-      setPublishedIds(new Set(ps.filter(p => p.results_published).map(p => String(p.id))));
     }).catch(() => {});
     api.scoresByJudge(user.id).then(rows => {
       const map = {};
@@ -47,10 +45,6 @@ export default function JudgePortal() {
     const onConnect = () => setConnected(true);
     const onDisconnect = () => setConnected(false);
 
-    const onPublished = (p) => setPublishedIds(prev => new Set(prev).add(String(p.program_id)));
-    const onUnpublished = (p) => setPublishedIds(prev => { const n = new Set(prev); n.delete(String(p.program_id)); return n; });
-    socket.on('results:published', onPublished);
-    socket.on('results:unpublished', onUnpublished);
     socket.on('registration:new', onNew);
     socket.on('score:submitted', onScore);
     socket.on('connect', onConnect);
@@ -58,29 +52,12 @@ export default function JudgePortal() {
 
     return () => {
       socket.emit('leave_program', activeProgram);
-      socket.off('results:published', onPublished);
-      socket.off('results:unpublished', onUnpublished);
       socket.off('registration:new', onNew);
       socket.off('score:submitted', onScore);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
     };
   }, [activeProgram]);
-
-  const isPublished = publishedIds.has(String(activeProgram));
-  const pendingCount = list.filter(r => !['judged', 'results_announced'].includes(r.status)).length;
-  const activeName = programs.find(p => String(p.id) === String(activeProgram))?.name;
-
-  const publish = async () => {
-    setPublishMsg('');
-    if (!window.confirm(`Publish results for "${activeName}"? They go live on the home page immediately.`)) return;
-    try {
-      await api.publishResults(activeProgram, user.id);
-      setPublishedIds(prev => new Set(prev).add(String(activeProgram)));
-    } catch (err) {
-      setPublishMsg(err.message);
-    }
-  };
 
   const submitScore = async (e) => {
     e.preventDefault();
@@ -108,24 +85,6 @@ export default function JudgePortal() {
           {programs.map(p => <option key={p.id} value={p.id}>{programLabel(p)}</option>)}
         </select>
       </div>
-
-      {activeProgram && (
-        <div className="card publish-box">
-          {isPublished ? (
-            <p><strong>✓ Results published.</strong> They're live on the home page and leaderboard.</p>
-          ) : (
-            <>
-              <p>
-                {list.length === 0 ? 'No participants registered yet.'
-                  : pendingCount === 0 ? 'Every participant has been scored by the full panel — ready to publish.'
-                  : `${pendingCount} of ${list.length} participants still need scores from every judge before you can publish.`}
-              </p>
-              <button onClick={publish} disabled={list.length === 0 || pendingCount > 0}>Publish results</button>
-              {publishMsg && <p className="error">{publishMsg}</p>}
-            </>
-          )}
-        </div>
-      )}
 
       {activeProgram && (
         <div className="grid-2">
@@ -175,6 +134,7 @@ export default function JudgePortal() {
           )}
         </div>
       )}
+      <PasswordChange />
     </div>
   );
 }

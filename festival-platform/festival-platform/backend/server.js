@@ -2,14 +2,17 @@ const express = require('express');
 const cors = require('cors');
 const http = require('http');
 const { Server } = require('socket.io');
+const { sessionForToken, isAssignedJudge } = require('./sessionAuth');
 
 require('./adminAuth').ensureAdmin();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, { cors: { origin: '*' } });
+const frontendOrigins = (process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+const corsOrigin = frontendOrigins.length ? frontendOrigins : '*';
+const io = new Server(server, { cors: { origin: corsOrigin } });
 
-app.use(cors());
+app.use(cors({ origin: corsOrigin }));
 app.use(express.json());
 
 // Make io available to routes via app locals
@@ -26,8 +29,11 @@ app.use('/api/control', require('./routes/control'));   // hidden admin API (tok
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 io.on('connection', (socket) => {
+  const session = sessionForToken(socket.handshake.auth?.token);
+  if (session) setTimeout(() => socket.disconnect(true), Math.max(0, session.expires - Date.now()));
   socket.on('join_program', (programId) => {
-    socket.join(`program:${programId}`);
+    const user = sessionForToken(socket.handshake.auth?.token);
+    if (user?.role === 'judge' && isAssignedJudge(user.id, programId)) socket.join(`program:${programId}`);
   });
   socket.on('leave_program', (programId) => {
     socket.leave(`program:${programId}`);

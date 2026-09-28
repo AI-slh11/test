@@ -10,6 +10,8 @@ import Hero from './pages/Hero.jsx';
 import ControlRoom from './pages/ControlRoom.jsx';
 import { ADMIN_PATH } from './adminApi.js';
 import AdminDashboard from './pages/AdminDashboard.jsx';
+import { api, setAuthToken, clearAuthToken } from './api.js';
+import { socket } from './socket.js';
 import ClickSparks from './ClickSparks.jsx';
 import CommandPalette from './CommandPalette.jsx';
 
@@ -18,16 +20,25 @@ export const useAuth = () => useContext(AuthContext);
 
 function AuthProvider({ children }) {
   const [user, setUser] = useState(() => {
-    const raw = localStorage.getItem('festival_user');
-    return raw ? JSON.parse(raw) : null;
+    try {
+      const raw = localStorage.getItem('festival_user');
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   });
-  const login = (u) => {
+  const login = (u, token) => {
     setUser(u);
     localStorage.setItem('festival_user', JSON.stringify(u));
+    setAuthToken(token);
+    socket.disconnect();
+    socket.connect();
   };
   const logout = () => {
+    api.logout().catch(() => {});
     setUser(null);
     localStorage.removeItem('festival_user');
+    clearAuthToken();
+    socket.disconnect();
+    socket.connect();
   };
   return <AuthContext.Provider value={{ user, login, logout }}>{children}</AuthContext.Provider>;
 }

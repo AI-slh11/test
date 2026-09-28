@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../db');
+const { optionalAuth, requireRole, requireOrganizerOrControlAdmin } = require('../sessionAuth');
 
 const CATEGORIES = ['premier', 'junior'];
 const FIRST_NUMBER = { premier: 28, junior: 96 };
@@ -12,7 +13,7 @@ function nextNumber(category) {
 }
 
 // List all programs (with assigned judges + registration counts)
-router.get('/', (req, res) => {
+router.get('/', optionalAuth, (req, res) => {
   const { category } = req.query;
   const programs = CATEGORIES.includes(category)
     ? db.prepare(`SELECT * FROM programs WHERE category = ? ORDER BY ${ORDER}`).all(category)
@@ -24,14 +25,15 @@ router.get('/', (req, res) => {
   const countStmt = db.prepare('SELECT COUNT(*) c FROM registrations WHERE program_id = ?');
   const result = programs.map(p => ({
     ...p,
-    judges: judgesStmt.all(p.id),
+    judges: req.user?.role === 'organizer' || req.admin ? judgesStmt.all(p.id) : [],
     registration_count: countStmt.get(p.id).c
   }));
   res.json(result);
 });
 
 // Programs assigned to a specific judge
-router.get('/for-judge/:judgeId', (req, res) => {
+router.get('/for-judge/:judgeId', requireRole('judge'), (req, res) => {
+  if (String(req.user.id) !== String(req.params.judgeId)) return res.status(403).json({ error: 'You can only view your assigned programs' });
   const programs = db.prepare(`
     SELECT p.* FROM programs p
     JOIN program_judges pj ON pj.program_id = p.id
@@ -40,6 +42,8 @@ router.get('/for-judge/:judgeId', (req, res) => {
   `).all(req.params.judgeId);
   res.json(programs);
 });
+
+router.use(requireOrganizerOrControlAdmin);
 
 // Create a program. category = premier | junior; number defaults to the next free one.
 router.post('/', (req, res) => {
@@ -111,13 +115,23 @@ router.delete('/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin override: publish / unpublish a program's results (no completeness check)
+// Organizer reviews standings before publishing them to the public feed.
 router.patch('/:id/published', (req, res) => {
   const on = !!req.body.published;
   const prog = db.prepare('SELECT * FROM programs WHERE id = ?').get(req.params.id);
   if (!prog) return res.status(404).json({ error: 'Program not found' });
   const io = req.app.get('io');
   if (on) {
+    const assignedJudgeCount = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(prog.id).c;
+    const registrations = db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(prog.id);
+    const fullyJudged = assignedJudgeCount > 0 && registrations.length > 0 && registrations.every(r => {
+      const submitted = db.prepare(`SELECT COUNT(*) c FROM scores s JOIN program_judges pj
+        ON pj.judge_id = s.judge_id AND pj.program_id = ? WHERE s.registration_id = ?`).get(prog.id, r.id).c;
+      return submitted >= assignedJudgeCount;
+    });
+    if (!fullyJudged) {
+      return res.status(409).json({ error: 'All participants must be fully judged before results can be published' });
+    }
     if (!prog.results_published) {
       db.prepare("UPDATE programs SET results_published = 1, published_at = datetime('now') WHERE id = ?").run(prog.id);
       db.prepare("UPDATE registrations SET status = 'results_announced' WHERE program_id = ? AND status = 'judged'").run(prog.id);
