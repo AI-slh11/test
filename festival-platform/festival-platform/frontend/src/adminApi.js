@@ -1,6 +1,6 @@
 // Client for the hidden admin API (/api/control/*). Token lives in sessionStorage only,
 // so closing the tab signs the admin out.
-const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '');
+const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : 'https://test-t24x.onrender.com/api');
 export const ADMIN_PATH = import.meta.env.VITE_ADMIN_PATH || '/control-room';
 const KEY = 'festival_admin_token';
 
@@ -52,3 +52,4 @@ export const adminApi = {
   updateRegistration: (id, r) => request(`/registrations/${id}`, send('PATCH', r)),
   deleteRegistration: (id) => request(`/registrations/${id}`, send('DELETE'))
 };
+
