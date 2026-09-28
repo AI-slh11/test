@@ -1,4 +1,6 @@
-const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : '');
+// Keep deployed builds functional even when the hosting dashboard has no
+// VITE_API_BASE setting. Explicit environment configuration still takes priority.
+const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : 'https://test-t24x.onrender.com/api');
 const TOKEN_KEY = 'festival_auth_token';
 
 export const getAuthToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
@@ -57,3 +59,4 @@ export const api = {
   results: (programId) => request(`/results/${programId}`),
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
+
