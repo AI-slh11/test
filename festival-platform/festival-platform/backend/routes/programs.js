@@ -6,7 +6,7 @@ const { assignmentConflict, assignmentConflictForSlot } = require('../judgeAssig
 const { recordAudit } = require('../audit');
 const { registrationIsFullyScored, updateJudgingStatus } = require('../registrationJudges');
 
-const CATEGORIES = ['premier', 'junior'];
+const CATEGORIES = ['premier', 'junior', 'general'];
 const FIRST_NUMBER = { premier: 28, junior: 96 };
 const ORDER = "CASE category WHEN 'premier' THEN 0 WHEN 'junior' THEN 1 ELSE 2 END, number, id";
 
@@ -18,8 +18,10 @@ function nextNumber(category) {
 // List all programs (with assigned judges + registration counts)
 router.get('/', optionalAuth, (req, res) => {
   const { category } = req.query;
-  const programs = CATEGORIES.includes(category)
-    ? db.prepare(`SELECT * FROM programs WHERE category = ? ORDER BY ${ORDER}`).all(category)
+  const programs = category === 'general'
+    ? db.prepare(`SELECT * FROM programs WHERE category IS NULL ORDER BY ${ORDER}`).all()
+    : ['premier', 'junior'].includes(category)
+      ? db.prepare(`SELECT * FROM programs WHERE category = ? ORDER BY ${ORDER}`).all(category)
     : db.prepare(`SELECT * FROM programs ORDER BY ${ORDER}`).all();
   const judgesStmt = db.prepare(`
     SELECT u.id, u.code, u.name FROM program_judges pj
@@ -50,17 +52,20 @@ router.use(requireOrganizerOrControlAdmin);
 
 // Create a program. category = premier | junior; number defaults to the next free one.
 router.post('/', (req, res) => {
-  const { name, code, type, language, time_slot, quota, category, judge_ids } = req.body;
-  if (!name || !category) return res.status(400).json({ error: 'name and category required' });
-  if (!CATEGORIES.includes(category)) return res.status(400).json({ error: 'category must be premier or junior' });
+  const { name, code, type, language, time_slot, quota, judge_ids } = req.body;
+  const requestedCategory = req.body.category;
+  if (!name || !requestedCategory) return res.status(400).json({ error: 'name and category required' });
+  if (!CATEGORIES.includes(requestedCategory)) return res.status(400).json({ error: 'category must be premier, junior or general' });
+  const category = requestedCategory === 'general' ? null : requestedCategory;
   const progType = type || 'writing';
   if (!['writing', 'stage'].includes(progType)) return res.status(400).json({ error: 'type must be writing or stage' });
-  const number = req.body.number ? Number(req.body.number) : nextNumber(category);
-  if (!Number.isInteger(number) || number < 1) return res.status(400).json({ error: 'number must be a positive whole number' });
-  if (db.prepare('SELECT 1 FROM programs WHERE category = ? AND number = ?').get(category, number)) {
+  const number = category ? (req.body.number ? Number(req.body.number) : nextNumber(category)) : null;
+  if (category && (!Number.isInteger(number) || number < 1)) return res.status(400).json({ error: 'number must be a positive whole number' });
+  if (category && db.prepare('SELECT 1 FROM programs WHERE category = ? AND number = ?').get(category, number)) {
     return res.status(409).json({ error: `Program number ${number} already exists in ${category}` });
   }
-  const progCode = (code || `${category === 'premier' ? 'P' : 'J'}${number}`).toUpperCase();
+  const generalCode = `G${db.prepare('SELECT COUNT(*) c FROM programs WHERE category IS NULL').get().c + 1}`;
+  const progCode = (code || (category ? `${category === 'premier' ? 'P' : 'J'}${number}` : generalCode)).toUpperCase();
   const q = quota ? Number(quota) : null;
   const judgeIds = [...new Set(Array.isArray(judge_ids) ? judge_ids.map(Number) : [])];
   if (judgeIds.some(id => !Number.isInteger(id) || id < 1)) return res.status(400).json({ error: 'Select valid judges' });
@@ -118,9 +123,10 @@ router.patch('/:id', (req, res) => {
   const b = req.body;
   const type = b.type ?? cur.type;
   if (!['writing', 'stage'].includes(type)) return res.status(400).json({ error: 'type must be writing or stage' });
-  const category = 'category' in b ? (b.category || null) : cur.category;
-  if (category && !CATEGORIES.includes(category)) return res.status(400).json({ error: 'category must be premier or junior' });
-  const number = 'number' in b ? (b.number ? Number(b.number) : null) : cur.number;
+  const requestedCategory = 'category' in b ? (b.category || null) : cur.category;
+  if (requestedCategory && !CATEGORIES.includes(requestedCategory)) return res.status(400).json({ error: 'category must be premier, junior or general' });
+  const category = requestedCategory === 'general' ? null : requestedCategory;
+  const number = category ? ('number' in b ? (b.number ? Number(b.number) : null) : cur.number) : null;
   if (number !== null && (!Number.isInteger(number) || number < 1)) return res.status(400).json({ error: 'number must be a positive whole number' });
   if (category && number && db.prepare('SELECT 1 FROM programs WHERE category = ? AND number = ? AND id != ?').get(category, number, cur.id)) {
     return res.status(409).json({ error: `Program number ${number} already exists in ${category}` });
@@ -190,4 +196,3 @@ router.patch('/:id/quota', (req, res) => {
 });
 
 module.exports = router;
-

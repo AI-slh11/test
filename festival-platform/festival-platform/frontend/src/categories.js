@@ -1,6 +1,7 @@
 export const CATEGORIES = [
   { key: 'premier', label: 'Premier' },
-  { key: 'junior', label: 'Junior' }
+  { key: 'junior', label: 'Junior' },
+  { key: 'general', label: 'General' }
 ];
 export const categoryLabel = (key) => CATEGORIES.find(c => c.key === key)?.label || '';
 

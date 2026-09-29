@@ -29,7 +29,7 @@ export default function Register() {
     api.availableCodeLetters(form.program_id).then(data => setTakenLetters(data.taken)).catch(() => setTakenLetters([]));
   }, [form.program_id]);
 
-  const categoryPrograms = programs.filter(p => p.category === category);
+  const categoryPrograms = programs.filter(p => category === 'general' ? !p.category : p.category === category);
   const selectedProgram = programs.find(p => String(p.id) === String(form.program_id));
   const letterChoices = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))];
   const availableLetters = letterChoices.filter(letter => !takenLetters.includes(letter));

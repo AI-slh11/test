@@ -1,5 +1,6 @@
 // Official Rendezvous'26 program lists. Numbers are the festival's program numbers.
-// Premier: stage 28-41 and 60-61, written 42-59. Junior: stage 96-120 and 162-163, written 121-161. Seeded once on first run (see db.js);
+// Premier: stage 28-41, written 42-59. Junior: stage 96-120, written 121-161.
+// Qawwali and Group Song are general, unnumbered stage programs. Seeded once (see db.js);
 // after that the admin owns the list and can add / edit / delete freely.
 
 const PREMIER = [
@@ -42,9 +43,14 @@ const JUNIOR_STAGE = [
   [116, 'Ibarath Reading'], [117, "Qur'an Mastery"], [118, 'Hifzul Muthoon'], [119, 'Thadrees'], [120, "Musha'ara"]
 ];
 
-const EXTRA_STAGE = [
-  ['premier', [[60, 'Qawwali'], [61, 'Group Song']], 'P'],
-  ['junior', [[162, 'Qawwali'], [163, 'Group Song']], 'J']
+const GENERAL_STAGE = [
+  { name: 'Qawwali', code: 'QWL' },
+  { name: 'Group Song', code: 'GSO' }
+];
+
+const CODE_LETTER_OPTIONS = [
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))
 ];
 
 // Programs performed/shown live are "stage"; everything else is judged from a submission.
@@ -79,7 +85,125 @@ function seedPrograms(db) {
     (name) => (STAGE_NAMES.has(name) ? 'stage' : 'writing'));
   seedBatch(db, 'programs_seeded_v2_stage', [['premier', PREMIER_STAGE, 'P'], ['junior', JUNIOR_STAGE, 'J']],
     () => 'stage');
-  seedBatch(db, 'programs_seeded_v3_extra_stage', EXTRA_STAGE, () => 'stage');
+  seedGeneralStagePrograms(db);
+  consolidateGeneralStagePrograms(db);
+}
+
+function seedGeneralStagePrograms(db) {
+  const key = 'programs_seeded_v4_general_stage';
+  if (db.prepare('SELECT 1 FROM meta WHERE key = ?').get(key)) return;
+  const ensure = db.prepare(`INSERT INTO programs (name, code, type, language, category, number)
+    SELECT ?, ?, 'stage', NULL, NULL, NULL
+    WHERE NOT EXISTS (SELECT 1 FROM programs WHERE lower(trim(name)) = lower(?) AND category IS NULL)`);
+  db.transaction(() => {
+    for (const program of GENERAL_STAGE) ensure.run(program.name, program.code, program.name);
+    db.prepare("INSERT INTO meta (key, value) VALUES (?, datetime('now'))").run(key);
+  })();
+}
+
+function consolidateGeneralStagePrograms(db) {
+  const key = 'programs_consolidated_general_stage_v5';
+  if (db.prepare('SELECT 1 FROM meta WHERE key = ?').get(key)) return;
+
+  const participantExists = db.prepare('SELECT 1 FROM registrations WHERE participant_id = ? AND id != ?');
+  const snapshotProgramPanel = db.prepare('INSERT OR IGNORE INTO registration_judge_panels (registration_id) VALUES (?)');
+  const addRegistrationJudge = db.prepare('INSERT OR IGNORE INTO registration_judges (registration_id, judge_id) VALUES (?, ?)');
+  const addProgramJudge = db.prepare('INSERT OR IGNORE INTO program_judges (program_id, judge_id) VALUES (?, ?)');
+
+  const merge = db.transaction(() => {
+    for (const general of GENERAL_STAGE) {
+      const programs = db.prepare(`SELECT * FROM programs
+        WHERE lower(trim(name)) = lower(?) AND type = 'stage'
+        ORDER BY CASE WHEN category IS NULL THEN 0 ELSE 1 END,
+          CASE category WHEN 'premier' THEN 0 WHEN 'junior' THEN 1 ELSE 2 END, id`).all(general.name);
+      if (!programs.length) continue;
+
+      const target = programs[0];
+      const sourceIds = programs.slice(1).map(program => program.id);
+      const programIds = programs.map(program => program.id);
+      const placeholders = programIds.map(() => '?').join(',');
+      const judgeIds = [...new Set(programIds.flatMap(programId =>
+        db.prepare('SELECT judge_id FROM program_judges WHERE program_id = ?').all(programId).map(row => row.judge_id)))];
+
+      // Freeze each inherited panel before combining the program-level judge lists.
+      // This keeps each student's assigned panel and judging progress intact.
+      for (const program of programs) {
+        const defaults = db.prepare('SELECT judge_id FROM program_judges WHERE program_id = ?').all(program.id).map(row => row.judge_id);
+        const inherited = db.prepare(`SELECT r.id FROM registrations r
+          LEFT JOIN registration_judge_panels panel ON panel.registration_id = r.id
+          WHERE r.program_id = ? AND panel.registration_id IS NULL`).all(program.id);
+        for (const registration of inherited) {
+          snapshotProgramPanel.run(registration.id);
+          for (const judgeId of defaults) addRegistrationJudge.run(registration.id, judgeId);
+        }
+      }
+
+      const slots = [...new Set(programs.map(program => program.time_slot || ''))];
+      const quotas = programs.map(program => program.quota);
+      const quota = quotas.some(value => value == null) ? null : quotas.reduce((sum, value) => sum + value, 0);
+      const anyPublished = programs.some(program => !!program.results_published);
+      const registrations = db.prepare(`SELECT id, program_id, code_letter, participant_id, created_at
+        FROM registrations WHERE program_id IN (${placeholders})
+        ORDER BY CASE WHEN program_id = ? THEN 0 ELSE 1 END, created_at, id`).all(...programIds, target.id);
+
+      // Result places and team points belonged to separate category contests. Clear
+      // the combined podium for organizer review while retaining every scorecard.
+      if (programs.length > 1) {
+        db.prepare(`UPDATE registrations SET result_place = NULL WHERE program_id IN (${placeholders})`).run(...programIds);
+      }
+
+      const usedLetters = new Set();
+      let sequence = 1;
+      const nextParticipantId = (letter, registrationId) => {
+        let candidate;
+        do {
+          candidate = `FEST-${general.code}-${String(sequence++).padStart(3, '0')}-${letter}`;
+        } while (participantExists.get(candidate, registrationId));
+        return candidate;
+      };
+
+      const moveRegistration = db.prepare('UPDATE registrations SET program_id = ?, code_letter = ?, participant_id = ? WHERE id = ?');
+      for (const registration of registrations) {
+        let codeLetter = registration.code_letter;
+        if (usedLetters.has(codeLetter)) codeLetter = CODE_LETTER_OPTIONS.find(letter => !usedLetters.has(letter));
+        if (!codeLetter) throw new Error(`No unique performance code is available while consolidating ${general.name}.`);
+        usedLetters.add(codeLetter);
+        let participantId = registration.participant_id;
+        if (codeLetter !== registration.code_letter) participantId = nextParticipantId(codeLetter, registration.id);
+        moveRegistration.run(target.id, codeLetter, participantId, registration.id);
+      }
+
+      // Keep every judge available on the unified program. Student-specific panels
+      // have already been snapshotted above and therefore do not silently widen.
+      for (const judgeId of judgeIds) addProgramJudge.run(target.id, judgeId);
+      if (programs.length > 1) {
+        db.prepare(`UPDATE programs SET name = ?, code = ?, type = 'stage', language = NULL,
+          category = NULL, number = NULL, time_slot = ?, quota = ?, first_place_points = NULL,
+          second_place_points = NULL, third_place_points = NULL, results_published = 0, published_at = NULL
+          WHERE id = ?`).run(general.name, general.code, slots.length === 1 ? (slots[0] || null) : null, quota, target.id);
+      } else {
+        db.prepare(`UPDATE programs SET name = ?, code = ?, type = 'stage', language = NULL,
+          category = NULL, number = NULL WHERE id = ?`).run(general.name, general.code, target.id);
+      }
+
+      if (sourceIds.length) {
+        const deleteSource = db.prepare('DELETE FROM programs WHERE id = ?');
+        sourceIds.forEach(id => deleteSource.run(id));
+      }
+
+      db.prepare(`INSERT INTO audit_log (actor, action, entity, entity_id, details)
+        VALUES ('system migration', 'consolidate_general_program', 'program', ?, ?)`).run(String(target.id), JSON.stringify({
+          program: general.name,
+          merged_program_ids: sourceIds,
+          registrations_preserved: registrations.length,
+          result_places_reset: programs.length > 1,
+          previously_published: anyPublished
+        }));
+    }
+    db.prepare("INSERT INTO meta (key, value) VALUES (?, datetime('now'))").run(key);
+  });
+
+  merge();
 }
 
 module.exports = { seedPrograms, PREMIER, JUNIOR, PREMIER_STAGE, JUNIOR_STAGE };

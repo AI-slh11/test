@@ -159,10 +159,10 @@ function ProgramsTab({ programs, judges, run, editing, setEditing, isEditing, fi
   const [form, setForm] = useState(BLANK_PROGRAM);
 
   const shown = useMemo(() => programs.filter(p =>
-    (filter === 'all' || (filter === 'none' ? !p.category : p.category === filter)) &&
+      (filter === 'all' || (filter === 'none' || filter === 'general' ? !p.category : p.category === filter)) &&
     (!search || `${p.name} ${p.number} ${p.code}`.toLowerCase().includes(search.toLowerCase()))
   ), [programs, filter, search]);
-  const uncategorized = programs.filter(p => !p.category).length;
+  const uncategorized = programs.filter(p => !p.category && !['qawwali', 'group song'].includes(p.name.trim().toLowerCase())).length;
 
   const toggleJudge = (id) => setForm(f => ({ ...f, judge_ids: f.judge_ids.includes(id) ? f.judge_ids.filter(x => x !== id) : [...f.judge_ids, id] }));
   const create = (e) => {
@@ -180,8 +180,8 @@ function ProgramsTab({ programs, judges, run, editing, setEditing, isEditing, fi
               <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
                 {CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
               </select></div>
-            <div><label>Program number (blank = next free)</label>
-              <input type="number" min="1" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} /></div>
+            {form.category !== 'general' && <div><label>Program number (blank = next free)</label>
+              <input type="number" min="1" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} /></div>}
             <div><label>Name</label><input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
             <div><label>Short code (blank = auto)</label><input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} /></div>
             <div><label>Type</label>
@@ -212,8 +212,8 @@ function ProgramsTab({ programs, judges, run, editing, setEditing, isEditing, fi
       <div className="card">
         <div className="cr-toolbar">
           <div className="tabs" style={{ margin: 0 }}>
-            {[['all', `All (${programs.length})`], ...CATEGORIES.map(c => [c.key, `${c.label} (${programs.filter(p => p.category === c.key).length})`]),
-              ...(uncategorized ? [['none', `Uncategorized (${uncategorized})`]] : [])].map(([k, l]) => (
+              {[['all', `All (${programs.length})`], ...CATEGORIES.map(c => [c.key, `${c.label} (${programs.filter(p => c.key === 'general' ? !p.category && ['qawwali', 'group song'].includes(p.name.trim().toLowerCase()) : p.category === c.key).length})`]),
+              ...(uncategorized ? [['none', `Other uncategorized (${uncategorized})`]] : [])].map(([k, l]) => (
               <button key={k} className={`tab ${filter === k ? 'active' : ''}`} onClick={() => setFilter(k)}>{l}</button>
             ))}
           </div>

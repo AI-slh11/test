@@ -102,7 +102,7 @@ npm run dev         # http://localhost:5173, proxies /api to :4000
 
 ## Typical flow
 
-1. Organizer logs in → **Programs** → creates competitions (e.g. "Essay Writing (English)", type `writing`; "Qawwali Night", type `stage`).
+1. Organizer logs in → **Programs** → creates competitions (e.g. "Essay Writing (English)", type `writing`; "Qawwali", type `stage`, category `General`).
 2. Organizer assigns judges to each program from **Green Room**.
 3. Students self-register online at `/register`, or organizer adds them on-site from **Green Room** — both get a Code Letter + Participant ID instantly.
 4. Judge logs in, opens **Judge Portal**, selects the program — sees the anonymized, live-updating list and scores whoever they pick.

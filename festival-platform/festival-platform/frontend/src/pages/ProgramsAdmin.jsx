@@ -33,8 +33,10 @@ export default function ProgramsAdmin() {
           <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
             {CATEGORIES.map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
           </select>
-          <label>Program number (blank = next free number)</label>
-          <input type="number" min="1" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} />
+          {form.category !== 'general' && <>
+            <label>Program number (blank = next free number)</label>
+            <input type="number" min="1" value={form.number} onChange={e => setForm({ ...form, number: e.target.value })} />
+          </>}
           <label>Name</label>
           <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })}
             placeholder="e.g. Essay Writing (English)" required />
