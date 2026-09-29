@@ -6,6 +6,7 @@ import GreenRoom from './pages/GreenRoom.jsx';
 import JudgePortal from './pages/JudgePortal.jsx';
 import Leaderboard from './pages/Leaderboard.jsx';
 import MyResults from './pages/MyResults.jsx';
+import PublicSchedule from './pages/PublicSchedule.jsx';
 import ProgramsAdmin from './pages/ProgramsAdmin.jsx';
 import Hero from './pages/Hero.jsx';
 import ControlRoom from './pages/ControlRoom.jsx';
@@ -76,6 +77,7 @@ function Nav() {
         <Link to="/">Home</Link>
         <Link to="/register">Student Registration</Link>
         <Link to="/leaderboard">Leaderboard</Link>
+        <Link to="/schedule">Schedule</Link>
         <Link to="/live-results">Live Display</Link>
         <Link to="/my-results">My Results</Link>
         {user?.role === 'organizer' && <Link to="/admin/dashboard">Dashboard</Link>}
@@ -112,6 +114,7 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/schedule" element={<PublicSchedule />} />
           <Route path="/live-results" element={<Leaderboard live />} />
           <Route path="/my-results" element={<MyResults />} />
           <Route path="/admin/dashboard" element={<RequireRole role="organizer"><AdminDashboard /></RequireRole>} />
@@ -124,4 +127,3 @@ export default function App() {
     </AuthProvider>
   );
 }
-

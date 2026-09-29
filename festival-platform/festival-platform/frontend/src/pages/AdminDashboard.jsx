@@ -4,10 +4,11 @@ import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
 import PasswordChange from '../PasswordChange.jsx';
 import OrganizerResults from './OrganizerResults.jsx';
+import ScheduleAdmin from './ScheduleAdmin.jsx';
 import QRCode from 'qrcode';
 import { downloadAdminCsv, parseCsv } from '../adminCsv.js';
 
-const TABS = ['Overview', 'Programs', 'Judges', 'Registrations', 'Results', 'Check-in', 'Activity'];
+const TABS = ['Overview', 'Programs', 'Judges', 'Registrations', 'Results', 'Schedule', 'Check-in', 'Activity'];
 
 export default function AdminDashboard({ initialTab = 'Overview' }) {
   const [tab, setTab] = useState(initialTab);
@@ -251,6 +252,7 @@ export default function AdminDashboard({ initialTab = 'Overview' }) {
         </tbody></table></div></div>}
       {qrRegistration && <RegistrationQr registration={qrRegistration} onClose={() => setQrRegistration(null)} />}
       {tab === 'Results' && <OrganizerResults programs={programs} />}
+      {tab === 'Schedule' && <ScheduleAdmin />}
       <PasswordChange />
     </div>
   );
@@ -309,4 +311,3 @@ function NewJudge({ onCreate }) {
     </div>
   );
 }
-

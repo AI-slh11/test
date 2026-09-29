@@ -124,6 +124,11 @@ export const api = {
   deleteRegistration: (id) => request(`/registrations/${id}`, { method: 'DELETE' }),
 
   publicFeed: () => request('/results/public/feed'),
+  publicSchedule: () => request('/schedule'),
+  organizerSchedule: () => request('/schedule'),
+  createScheduleItem: (payload) => request('/schedule', { method: 'POST', body: JSON.stringify(payload) }),
+  updateScheduleItem: (id, payload) => request(`/schedule/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
+  deleteScheduleItem: (id) => request(`/schedule/${id}`, { method: 'DELETE' }),
   studentRegistrations: (studentId) => request('/results/student-lookup', {
     method: 'POST', body: JSON.stringify({ student_id: studentId.trim().toUpperCase() })
   }),
@@ -136,5 +141,4 @@ export const api = {
   downloadCertificatesZip,
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
-
 

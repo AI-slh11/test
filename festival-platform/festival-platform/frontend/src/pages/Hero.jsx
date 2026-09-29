@@ -4,6 +4,7 @@ import GhostFibers from '../GhostFibers.jsx';
 import ExpandableProfileCard from '../ExpandableProfileCard.jsx';
 import ResultsSection from '../ResultsSection.jsx';
 import ScrollTextLine from '../ScrollTextLine.jsx';
+import { ScheduleSection } from './PublicSchedule.jsx';
 
 const WORD = 'RENDEZVOUS';
 // Festival Collective (names and roles as printed on the official Zynex poster)
@@ -126,6 +127,7 @@ export default function Hero() {
         ))}
       </div>
     </section>
+    <ScheduleSection compact />
     </div>
     </>
   );

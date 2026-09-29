@@ -118,6 +118,22 @@ if (!hasCol('programs', 'second_place_points')) db.exec('ALTER TABLE programs AD
 if (!hasCol('programs', 'third_place_points')) db.exec('ALTER TABLE programs ADD COLUMN third_place_points INTEGER');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_prog_cat_num ON programs(category, number)');
 
+// Shared organizer-created public schedule.
+db.exec(`CREATE TABLE IF NOT EXISTS schedule_items (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  title TEXT NOT NULL,
+  schedule_date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT,
+  venue TEXT,
+  notes TEXT,
+  published INTEGER NOT NULL DEFAULT 0,
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_schedule_public_order ON schedule_items(published, schedule_date, start_time, sort_order, id)');
+
 // Hidden admin accounts (separate from organizer/judge users). Passwords are stored as scrypt hashes.
 db.exec(`CREATE TABLE IF NOT EXISTS admins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -175,5 +191,4 @@ for (const row of passwordRows) {
 require('./programSeed').seedPrograms(db);
 
 module.exports = db;
-
 
