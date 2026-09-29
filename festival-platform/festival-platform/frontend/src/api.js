@@ -1,3 +1,5 @@
+import JSZip from 'jszip';
+
 // Keep deployed builds functional even when the hosting dashboard has no
 // VITE_API_BASE setting. Explicit environment configuration still takes priority.
 const BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? '/api' : 'https://test-t24x.onrender.com/api');
@@ -7,6 +9,53 @@ let sessionExpiredNotified = false;
 export const getAuthToken = () => { try { return localStorage.getItem(TOKEN_KEY) || ''; } catch { return ''; } };
 export const setAuthToken = (token) => { sessionExpiredNotified = false; try { localStorage.setItem(TOKEN_KEY, token); } catch {} };
 export const clearAuthToken = () => { try { localStorage.removeItem(TOKEN_KEY); } catch {} };
+
+async function downloadCertificate(programId, registrationId) {
+  const res = await fetch(`${BASE}/results/${programId}/certificate/${registrationId}`, {
+    headers: getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {}
+  });
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch {}
+    if (res.status === 401) {
+      clearAuthToken();
+      try { localStorage.removeItem('festival_user'); } catch {}
+      if (!sessionExpiredNotified) {
+        sessionExpiredNotified = true;
+        window.dispatchEvent(new Event('festival:session-expired'));
+      }
+    }
+    throw new Error(data.error || 'Could not generate certificate');
+  }
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `certificate-${registrationId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
+async function downloadCertificatesZip(programId, winners) {
+  const zip = new JSZip();
+  const token = getAuthToken();
+  for (const winner of winners) {
+    const response = await fetch(`${BASE}/results/${programId}/certificate/${winner.registration_id}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) {
+      let data = {};
+      try { data = await response.json(); } catch {}
+      throw new Error(data.error || `Could not generate ${winner.place} place certificate`);
+    }
+    zip.file(`${winner.place}-${String(winner.student_name || winner.participant_id).replace(/[^a-z0-9-_ ]/gi, '').trim() || winner.participant_id}.pdf`, await response.blob());
+  }
+  const blob = await zip.generateAsync({ type: 'blob' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a'); link.href = url; link.download = `program-${programId}-winner-certificates.zip`;
+  link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 async function request(path, options = {}) {
   if (!BASE) throw new Error('Set VITE_API_BASE to the deployed backend URL before building this frontend.');
@@ -49,7 +98,14 @@ export const api = {
   unassignJudge: (programId, judgeId) => request(`/programs/${programId}/judges/${judgeId}`, { method: 'DELETE' }),
 
   register: (payload) => request('/registrations', { method: 'POST', body: JSON.stringify(payload) }),
+  availableCodeLetters: (programId) => request(`/registrations/available-letters?program_id=${programId}`),
   listRegistrations: (programId) => request(`/registrations${programId ? `?program_id=${programId}` : ''}`),
+  setRegistrationJudges: (registrationId, judgeIds) => request(`/registrations/${registrationId}/judges`, { method: 'PUT', body: JSON.stringify({ judge_ids: judgeIds }) }),
+  resetRegistrationJudges: (registrationId) => request(`/registrations/${registrationId}/judges`, { method: 'PUT', body: JSON.stringify({ inherit_program_panel: true }) }),
+  bulkRegister: (registrations) => request('/registrations/bulk', { method: 'POST', body: JSON.stringify({ registrations }) }),
+  checkin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`, { method: 'POST' }),
+  undoCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`, { method: 'DELETE' }),
+  lookupCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`),
   judgeView: (programId) => request(`/registrations/judge-view?program_id=${programId}`),
   setStatus: (id, status) => request(`/registrations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
@@ -58,6 +114,8 @@ export const api = {
   scoresByJudge: (judgeId) => request(`/scores/by-judge/${judgeId}`),
 
   adminStats: () => request('/admin/stats'),
+  auditLog: () => request('/admin/audit-log'),
+  registrationsCsvUrl: () => `${BASE}/admin/registrations.csv`,
   updateProgram: (id, payload) => request(`/programs/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
   deleteProgram: (id) => request(`/programs/${id}`, { method: 'DELETE' }),
   updateJudge: (id, payload) => request(`/auth/judges/${id}`, { method: 'PATCH', body: JSON.stringify(payload) }),
@@ -72,8 +130,10 @@ export const api = {
   setPublished: (programId, published) => request(`/programs/${programId}/published`, { method: 'PATCH', body: JSON.stringify({ published }) }),
 
   reviewResults: (programId) => request(`/results/${programId}/review`),
-  setResultPlaces: (programId, placements) => request(`/results/${programId}/placements`, { method: 'PUT', body: JSON.stringify({ placements }) }),
+  setResultPlaces: (programId, placements, teamPoints) => request(`/results/${programId}/placements`, { method: 'PUT', body: JSON.stringify({ placements, team_points: teamPoints }) }),
   results: (programId) => request(`/results/${programId}`),
+  downloadCertificate,
+  downloadCertificatesZip,
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
 

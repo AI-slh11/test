@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../api.js';
 import { useAuth } from '../App.jsx';
 
@@ -16,6 +16,7 @@ export default function Login() {
   });
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
 
   const submit = async (e) => {
     e.preventDefault();
@@ -23,7 +24,9 @@ export default function Login() {
     try {
       const { user, token } = await api.login(code.trim().toUpperCase(), password);
       login(user, token);
-      navigate(user.role === 'organizer' ? '/green-room' : '/judge');
+      const requested = searchParams.get('returnTo') || '';
+      const destination = requested.startsWith('/') && !requested.startsWith('//') ? requested : (user.role === 'organizer' ? '/green-room' : '/judge');
+      navigate(destination);
     } catch (err) {
       setError(err.message);
     }
@@ -44,5 +47,4 @@ export default function Login() {
     </div>
   );
 }
-
 

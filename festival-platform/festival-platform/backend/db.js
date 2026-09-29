@@ -4,6 +4,7 @@ const { hashPassword, verifyPassword, PREFIX } = require('./credentials');
 
 const db = new Database(path.join(__dirname, 'data', 'festival.db'));
 db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -40,13 +41,24 @@ CREATE TABLE IF NOT EXISTS registrations (
   is_team INTEGER NOT NULL DEFAULT 0,
   team_members TEXT,               -- comma separated, only if is_team
   language TEXT,                   -- chosen language for writing programs
-  code_letter TEXT NOT NULL,       -- A, B, C ... per program, in registration order
+  code_letter TEXT NOT NULL,       -- student-chosen performance order code, unique per program
   participant_id TEXT UNIQUE NOT NULL, -- FEST-[ProgramCode]-[RegNumber]-[CodeLetter]
   source TEXT NOT NULL CHECK(source IN ('online','onsite')) DEFAULT 'online',
   submission_file TEXT,            -- filename for writing submissions
   status TEXT NOT NULL DEFAULT 'registered'
     CHECK(status IN ('registered','submission_received','slot_assigned','judged','results_announced')),
   created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS registration_judge_panels (
+  registration_id INTEGER PRIMARY KEY REFERENCES registrations(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS registration_judges (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  registration_id INTEGER NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
+  judge_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  UNIQUE(registration_id, judge_id)
 );
 
 CREATE TABLE IF NOT EXISTS scores (
@@ -58,6 +70,22 @@ CREATE TABLE IF NOT EXISTS scores (
   remarks TEXT,                    -- max 500 chars, enforced in route
   created_at TEXT DEFAULT (datetime('now')),
   UNIQUE(registration_id, judge_id) -- one score per judge per participant, final once submitted
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  entity TEXT NOT NULL,
+  entity_id TEXT,
+  details TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS checkins (
+  registration_id INTEGER PRIMARY KEY REFERENCES registrations(id) ON DELETE CASCADE,
+  checked_in_by TEXT NOT NULL,
+  checked_in_at TEXT DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_reg_program ON registrations(program_id);
@@ -72,16 +100,22 @@ if (!db.prepare("PRAGMA table_info(programs)").all().some(c => c.name === 'quota
 // Migration: team (Aliora / Nexiora) on registrations; publish state on programs
 const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().some(c => c.name === col);
 if (!hasCol('registrations', 'team_name')) db.exec('ALTER TABLE registrations ADD COLUMN team_name TEXT');
+if (!hasCol('registrations', 'team_leader_name')) db.exec('ALTER TABLE registrations ADD COLUMN team_leader_name TEXT');
+if (!hasCol('registrations', 'team_leader_id')) db.exec('ALTER TABLE registrations ADD COLUMN team_leader_id TEXT');
 if (!hasCol('registrations', 'result_place')) {
   db.exec('ALTER TABLE registrations ADD COLUMN result_place INTEGER CHECK (result_place IS NULL OR result_place BETWEEN 1 AND 3)');
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_program_result_place ON registrations(program_id, result_place) WHERE result_place IS NOT NULL');
+db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_program_code_letter ON registrations(program_id, code_letter)');
 if (!hasCol('programs', 'results_published')) db.exec('ALTER TABLE programs ADD COLUMN results_published INTEGER NOT NULL DEFAULT 0');
 if (!hasCol('programs', 'published_at')) db.exec('ALTER TABLE programs ADD COLUMN published_at TEXT');
 
 // Migration: student category (premier / junior) + festival program number
 if (!hasCol('programs', 'category')) db.exec('ALTER TABLE programs ADD COLUMN category TEXT');
 if (!hasCol('programs', 'number')) db.exec('ALTER TABLE programs ADD COLUMN number INTEGER');
+if (!hasCol('programs', 'first_place_points')) db.exec('ALTER TABLE programs ADD COLUMN first_place_points INTEGER');
+if (!hasCol('programs', 'second_place_points')) db.exec('ALTER TABLE programs ADD COLUMN second_place_points INTEGER');
+if (!hasCol('programs', 'third_place_points')) db.exec('ALTER TABLE programs ADD COLUMN third_place_points INTEGER');
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_prog_cat_num ON programs(category, number)');
 
 // Hidden admin accounts (separate from organizer/judge users). Passwords are stored as scrypt hashes.

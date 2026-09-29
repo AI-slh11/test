@@ -3,8 +3,10 @@ const router = express.Router();
 const db = require('../db');
 const PDFDocument = require('pdfkit');
 
-const { TEAMS, PLACE_POINTS } = require('../teams');
+const { TEAMS } = require('../teams');
 const { requireRole } = require('../sessionAuth');
+const { recordAudit } = require('../audit');
+const { activeScores, assignedJudgeIds, registrationIsFullyScored } = require('../registrationJudges');
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 
 // Ranked results for one program. Judge-by-judge details are only returned by
@@ -12,7 +14,9 @@ const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 function computeRankings(programId, withIdentity = false) {
   const registrations = db.prepare('SELECT * FROM registrations WHERE program_id = ?').all(programId);
   const rows = registrations.map(r => {
-    const agg = db.prepare('SELECT AVG(score) avg_score, COUNT(*) n FROM scores WHERE registration_id = ?').get(r.id);
+    const scores = activeScores(r.id);
+    const n = scores.length;
+    const average = n ? scores.reduce((sum, score) => sum + score.score, 0) / n : null;
     const row = {
       registration_id: r.id,
       participant_id: r.participant_id,
@@ -20,8 +24,8 @@ function computeRankings(programId, withIdentity = false) {
       is_team: !!r.is_team,
       status: r.status,
       result_place: r.result_place,
-      judges_submitted: agg.n,
-      average_score: agg.n > 0 ? Math.round(agg.avg_score * 100) / 100 : null
+      judges_submitted: n,
+      average_score: average !== null ? Math.round(average * 100) / 100 : null
     };
     if (withIdentity) {
       row.team_name = r.team_name;
@@ -55,19 +59,26 @@ function buildPublicFeed() {
     'SELECT * FROM programs WHERE results_published = 1 ORDER BY published_at DESC, id DESC'
   ).all();
   const standings = Object.fromEntries(TEAMS.map(t => [t, 0]));
+  let hasPointAssignments = false;
 
   const published = programs.map(p => {
     const { ranked } = computeRankings(p.id, true);
+    const teamPoints = { 1: p.first_place_points, 2: p.second_place_points, 3: p.third_place_points };
     ranked.forEach(r => {
-      if (r.rank <= 3 && standings[r.team_name] !== undefined) standings[r.team_name] += PLACE_POINTS[r.rank];
+      const points = teamPoints[r.rank];
+      if (r.rank <= 3 && points != null && standings[r.team_name] !== undefined) {
+        standings[r.team_name] += points;
+        hasPointAssignments = true;
+      }
     });
     return {
-      program: { id: p.id, name: p.name, code: p.code, type: p.type, category: p.category, number: p.number },
+      program: { id: p.id, name: p.name, code: p.code, type: p.type, category: p.category, number: p.number, team_points: teamPoints },
       published_at: p.published_at,
       results: ranked.map(r => ({
         rank: r.rank,
         code_letter: r.code_letter,
         team_name: r.team_name,
+        team_points: teamPoints[r.rank] ?? null,
         average_score: r.average_score,
         is_group: r.is_team,
         name: r.rank <= 3 ? r.student_name : null,
@@ -76,7 +87,7 @@ function buildPublicFeed() {
     };
   });
 
-  return { teams: TEAMS, points: PLACE_POINTS, standings, published };
+  return { teams: TEAMS, has_points: hasPointAssignments, standings, published };
 }
 
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
@@ -128,22 +139,30 @@ router.post('/student-lookup', (req, res) => {
 
 // Organizer-only review includes each submitted judge score and registration identity.
 router.get('/:programId/review', requireRole('organizer'), (req, res) => {
-  const program = db.prepare(`SELECT id, name, code, category, number, results_published, published_at
+  const program = db.prepare(`SELECT id, name, code, category, number, results_published, published_at,
+      first_place_points, second_place_points, third_place_points
     FROM programs WHERE id = ?`).get(req.params.programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
 
-  const judges = db.prepare(`SELECT u.id, u.code, u.name FROM program_judges pj
-    JOIN users u ON u.id = pj.judge_id WHERE pj.program_id = ? ORDER BY u.name`).all(program.id);
+  const judges = db.prepare(`SELECT DISTINCT u.id, u.code, u.name FROM users u
+    WHERE u.role = 'judge' AND (
+      EXISTS (SELECT 1 FROM program_judges pj WHERE pj.program_id = ? AND pj.judge_id = u.id)
+      OR EXISTS (SELECT 1 FROM scores s JOIN registrations r ON r.id = s.registration_id
+        WHERE r.program_id = ? AND s.judge_id = u.id)
+    ) ORDER BY u.name`).all(program.id, program.id);
   const participants = db.prepare(`SELECT r.id AS registration_id, r.participant_id, r.code_letter,
-      r.student_name, r.team_name, r.is_team, r.team_members, r.status, r.result_place,
-      COUNT(s.id) AS judges_submitted, AVG(s.score) AS average_score
-    FROM registrations r LEFT JOIN scores s ON s.registration_id = r.id
-    WHERE r.program_id = ? GROUP BY r.id ORDER BY r.code_letter, r.id`).all(program.id);
+      r.student_name, r.team_name, r.is_team, r.team_members, r.status, r.result_place
+    FROM registrations r WHERE r.program_id = ? ORDER BY length(r.code_letter), r.code_letter, r.id`).all(program.id).map(participant => {
+      const scores = activeScores(participant.registration_id);
+      const average = scores.length ? scores.reduce((sum, score) => sum + score.score, 0) / scores.length : null;
+      return { ...participant, assigned_judge_ids: assignedJudgeIds(participant.registration_id),
+        judges_submitted: scores.length, average_score: average };
+    });
   const scores = db.prepare(`SELECT s.id, s.registration_id, s.judge_id, u.name AS judge_name,
       s.score, s.grade, s.remarks, s.created_at
     FROM scores s JOIN users u ON u.id = s.judge_id
     JOIN registrations r ON r.id = s.registration_id
-    WHERE r.program_id = ? ORDER BY r.code_letter, u.name`).all(program.id);
+    WHERE r.program_id = ? ORDER BY length(r.code_letter), r.code_letter, u.name`).all(program.id);
   const scoresByRegistration = new Map();
   for (const score of scores) {
     const items = scoresByRegistration.get(score.registration_id) || [];
@@ -153,7 +172,9 @@ router.get('/:programId/review', requireRole('organizer'), (req, res) => {
   res.json({ program, judges, participants: participants.map(p => ({
     ...p,
     average_score: p.average_score == null ? null : Math.round(p.average_score * 100) / 100,
-    scores: scoresByRegistration.get(p.registration_id) || []
+    scores: (scoresByRegistration.get(p.registration_id) || []).map(score => ({
+      ...score, active: p.assigned_judge_ids.includes(Number(score.judge_id))
+    }))
   })) });
 });
 
@@ -161,9 +182,23 @@ router.get('/:programId/review', requireRole('organizer'), (req, res) => {
 router.put('/:programId/placements', requireRole('organizer'), (req, res) => {
   const program = db.prepare('SELECT id, results_published FROM programs WHERE id = ?').get(req.params.programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
-  if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before changing its places' });
 
   const placements = req.body?.placements;
+  const suppliedPoints = req.body?.team_points;
+  let teamPoints = null;
+  if (suppliedPoints !== undefined) {
+    if (!suppliedPoints || typeof suppliedPoints !== 'object' || Array.isArray(suppliedPoints)) {
+      return res.status(400).json({ error: 'team_points must contain organizer-entered points for places 1, 2 and 3' });
+    }
+    teamPoints = {};
+    for (const place of [1, 2, 3]) {
+      const value = suppliedPoints[place];
+      if (value == null || value === '') teamPoints[place] = null;
+      else if (!Number.isInteger(Number(value)) || Number(value) < 0 || Number(value) > 10000) {
+        return res.status(400).json({ error: 'Points must be whole numbers from 0 to 10000, or blank' });
+      } else teamPoints[place] = Number(value);
+    }
+  }
   if (!Array.isArray(placements) || placements.length > 3) {
     return res.status(400).json({ error: 'placements must be an array with at most three entries' });
   }
@@ -180,15 +215,12 @@ router.put('/:programId/placements', requireRole('organizer'), (req, res) => {
     places.add(place);
   }
 
-  const assignedJudges = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(program.id).c;
   for (const item of placements) {
     const registrationId = Number(item.registration_id);
     const participant = db.prepare('SELECT id FROM registrations WHERE id = ? AND program_id = ?').get(registrationId, program.id);
     if (!participant) return res.status(400).json({ error: 'A selected participant does not belong to this program' });
-    const submitted = db.prepare(`SELECT COUNT(*) c FROM scores s JOIN program_judges pj
-      ON pj.judge_id = s.judge_id AND pj.program_id = ? WHERE s.registration_id = ?`).get(program.id, registrationId).c;
-    if (assignedJudges === 0 || submitted < assignedJudges) {
-      return res.status(409).json({ error: 'Only participants scored by every assigned judge can receive a place' });
+    if (!assignedJudgeIds(registrationId).length || !activeScores(registrationId).length) {
+      return res.status(409).json({ error: 'A participant needs at least one current assigned-judge score before receiving a draft place' });
     }
   }
 
@@ -196,9 +228,15 @@ router.put('/:programId/placements', requireRole('organizer'), (req, res) => {
     db.prepare('UPDATE registrations SET result_place = NULL WHERE program_id = ?').run(program.id);
     const update = db.prepare('UPDATE registrations SET result_place = ? WHERE id = ? AND program_id = ?');
     placements.forEach(item => update.run(Number(item.place), Number(item.registration_id), program.id));
+    if (teamPoints) {
+      db.prepare(`UPDATE programs SET first_place_points = ?, second_place_points = ?, third_place_points = ? WHERE id = ?`)
+        .run(teamPoints[1], teamPoints[2], teamPoints[3], program.id);
+    }
   });
   try { save(); }
   catch { return res.status(409).json({ error: 'Places could not be saved. Refresh and try again.' }); }
+  recordAudit(req, 'set_placements', 'program', program.id, { placements, team_points: teamPoints });
+  if (program.results_published) req.app.get('io').emit('results:published', { program_id: program.id, updated: true });
   res.json({ ok: true, placements: placements.length });
 });
 
@@ -215,7 +253,7 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
   const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
   if (!program.results_published) return res.status(403).json({ error: 'Certificates are available after results are published' });
-  const { ranked } = computeRankings(programId);
+  const { ranked } = computeRankings(programId, true);
   const entry = ranked.find(r => String(r.registration_id) === String(registrationId));
   if (!entry || entry.rank > 3) return res.status(404).json({ error: 'No certificate available (not placed 1st-3rd)' });
 
@@ -231,6 +269,12 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
   doc.fontSize(16).text('Campus Festival', { align: 'center' });
   doc.moveDown(2);
   doc.fontSize(20).text(placeLabel, { align: 'center' });
+  doc.moveDown();
+  doc.fontSize(22).text(entry.student_name, { align: 'center' });
+  if (entry.is_team && entry.team_members) {
+    doc.moveDown(0.5);
+    doc.fontSize(12).text(`Team members: ${entry.team_members}`, { align: 'center' });
+  }
   doc.moveDown();
   doc.fontSize(14).text(`Program: ${program.name}${program.category ? ` (${program.category[0].toUpperCase() + program.category.slice(1)})` : ''}`, { align: 'center' });
   doc.text(`Participant Code: ${entry.code_letter}`, { align: 'center' });

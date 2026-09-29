@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
+import { downloadResultsPoster } from '../resultsPoster.js';
 
 const placeNames = { 1: '1st', 2: '2nd', 3: '3rd' };
 
@@ -9,20 +10,29 @@ export default function OrganizerResults({ programs }) {
   const [programId, setProgramId] = useState('');
   const [review, setReview] = useState(null);
   const [places, setPlaces] = useState({});
+  const [teamPoints, setTeamPoints] = useState({ 1: '', 2: '', 3: '' });
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [editingScore, setEditingScore] = useState(null);
   const [scoreForm, setScoreForm] = useState({ score: '', grade: 'A', remarks: '' });
+  const [downloadingCertificate, setDownloadingCertificate] = useState(null);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const [downloadingPoster, setDownloadingPoster] = useState(false);
 
   const loadReview = async (id = programId) => {
-    if (!id) { setReview(null); return; }
+    if (!id) { setReview(null); setTeamPoints({ 1: '', 2: '', 3: '' }); return; }
     setLoading(true);
     setError('');
     try {
       const data = await api.reviewResults(id);
       setReview(data);
+      setTeamPoints({
+        1: data.program.first_place_points ?? '',
+        2: data.program.second_place_points ?? '',
+        3: data.program.third_place_points ?? ''
+      });
       setPlaces(Object.fromEntries(data.participants
         .filter(row => row.result_place != null)
         .map(row => [row.registration_id, String(row.result_place)])));
@@ -36,14 +46,15 @@ export default function OrganizerResults({ programs }) {
 
   useEffect(() => {
     setMessage('');
-    if (!programId) { setReview(null); setPlaces({}); return; }
+    if (!programId) { setReview(null); setPlaces({}); setTeamPoints({ 1: '', 2: '', 3: '' }); return; }
     loadReview(programId);
   }, [programId]);
 
   const participants = review?.participants || [];
   const judgeCount = review?.judges.length || 0;
-  const allJudged = participants.length > 0 && judgeCount > 0
-    && participants.every(row => row.judges_submitted >= judgeCount);
+  const panelSize = row => row.assigned_judge_ids?.length ?? judgeCount;
+  const participantComplete = row => panelSize(row) > 0 && row.judges_submitted >= panelSize(row);
+  const allJudged = participants.length > 0 && participants.every(participantComplete);
   const requiredPlaces = Math.min(3, participants.length);
   const placeValues = Object.values(places).filter(Boolean);
   const podiumComplete = requiredPlaces > 0
@@ -55,7 +66,10 @@ export default function OrganizerResults({ programs }) {
   const currentPlaces = Object.entries(places)
     .filter(([, place]) => place)
     .map(([id, place]) => `${id}:${place}`).sort().join('|');
-  const hasUnsavedChanges = !!review && savedPlaces !== currentPlaces;
+  const savedTeamPoints = review ? [review.program.first_place_points, review.program.second_place_points, review.program.third_place_points]
+    .map(value => value == null ? '' : String(value)).join('|') : '';
+  const currentTeamPoints = [1, 2, 3].map(place => teamPoints[place] == null ? '' : String(teamPoints[place])).join('|');
+  const hasUnsavedChanges = !!review && (savedPlaces !== currentPlaces || savedTeamPoints !== currentTeamPoints);
 
   const setParticipantPlace = (registrationId, nextPlace) => {
     setPlaces(current => {
@@ -76,9 +90,12 @@ export default function OrganizerResults({ programs }) {
     try {
       const placements = Object.entries(places).filter(([, place]) => place)
         .map(([registration_id, place]) => ({ registration_id: Number(registration_id), place: Number(place) }));
-      await api.setResultPlaces(programId, placements);
+      const points = Object.fromEntries([1, 2, 3].map(place => [place, teamPoints[place] === '' ? null : Number(teamPoints[place])]));
+      await api.setResultPlaces(programId, placements, points);
       await loadReview(programId);
-      setMessage('Places saved. Review them, then publish when every participant has been judged.');
+      setMessage(review?.program.results_published
+        ? 'Published places updated on the public leaderboard.'
+        : 'Places saved. Review them, then publish when every participant has been judged.');
     } catch (e) {
       setError(e.message || 'Could not save places.');
     } finally {
@@ -118,6 +135,40 @@ export default function OrganizerResults({ programs }) {
     } finally { setSaving(false); }
   };
 
+  const generateCertificate = async (winner) => {
+    setDownloadingCertificate(winner.registration_id);
+    setError('');
+    try {
+      await api.downloadCertificate(programId, winner.registration_id);
+    } catch (e) {
+      setError(e.message || 'Could not generate certificate.');
+    } finally { setDownloadingCertificate(null); }
+  };
+
+  const generateAllCertificates = async () => {
+    const winners = [1, 2, 3].map(place => participants.find(row => Number(row.result_place) === place))
+      .filter(Boolean).map(row => ({ ...row, place: `${row.result_place}-place` }));
+    setDownloadingAll(true); setError('');
+    try { await api.downloadCertificatesZip(programId, winners); setMessage(`Downloaded ${winners.length} winner certificates in one ZIP file.`); }
+    catch (e) { setError(e.message || 'Could not generate certificates.'); }
+    finally { setDownloadingAll(false); }
+  };
+
+  const generatePoster = async () => {
+    setDownloadingPoster(true); setError('');
+    try {
+      const winners = [1, 2, 3].map(place => participants.find(row => Number(row.result_place) === place))
+        .filter(Boolean).map(row => ({ ...row, rank: Number(row.result_place) }));
+      await downloadResultsPoster({ program: review.program, winners });
+      setMessage('Published results poster downloaded.');
+    } catch (e) { setError(e.message || 'Could not generate the results poster.'); }
+    finally { setDownloadingPoster(false); }
+  };
+
+  const tiedScores = participants.filter(row => row.average_score != null)
+    .reduce((groups, row) => groups.set(row.average_score, [...(groups.get(row.average_score) || []), row]), new Map());
+  const ties = [...tiedScores.values()].filter(group => group.length > 1 && group.some(row => Number(row.result_place) <= 3 || !row.result_place));
+
   return (
     <section className="organizer-results">
       <div className="card">
@@ -145,25 +196,73 @@ export default function OrganizerResults({ programs }) {
               <p className="muted">{participants.length} participants · {judgeCount} assigned judges · {review.program.results_published ? 'Published' : 'Draft'}</p>
             </div>
             <div className="results-admin-actions">
+              <button className="secondary" disabled={saving || !hasUnsavedChanges} onClick={savePlaces}>
+                {saving ? 'Saving…' : review.program.results_published ? 'Save published changes' : 'Save places'}
+              </button>
               {review.program.results_published ? (
-                <button className="secondary" disabled={saving} onClick={() => publish(false)}>Unpublish to edit</button>
+                <button className="danger" disabled={saving} onClick={() => publish(false)}>Unpublish results</button>
               ) : (
-                <>
-                  <button className="secondary" disabled={saving || !hasUnsavedChanges} onClick={savePlaces}>{saving ? 'Saving…' : 'Save places'}</button>
-                  <button disabled={saving || hasUnsavedChanges || !allJudged || !podiumComplete} onClick={() => publish(true)}>
-                    {saving ? 'Publishing…' : 'Publish results'}
-                  </button>
-                </>
+                <button disabled={saving || hasUnsavedChanges || !allJudged || !podiumComplete} onClick={() => publish(true)}>
+                  {saving ? 'Publishing…' : 'Publish results'}
+                </button>
               )}
             </div>
           </div>
 
           {!judgeCount && <p className="error">Assign at least one judge to this program before placing or publishing results.</p>}
+          {ties.map(group => <p className="error" role="alert" key={group.map(row => row.registration_id).join('-')}>
+            Tie alert: {group.map(row => row.participant_id).join(' and ')} both have {group[0].average_score}. Review the full scorecards, then assign distinct podium places using the organizer’s tie-break decision.
+          </p>)}
           {participants.length > 0 && !allJudged && judgeCount > 0 && (
-            <p className="muted">Publishing is available after every assigned judge has submitted a score for every participant.</p>
+            <p className="muted">You can save draft places as scorecards arrive. Publishing unlocks after every assigned judge has scored every participant.</p>
           )}
           {!review.program.results_published && !podiumComplete && participants.length > 0 && (
             <p className="muted">Assign the first {requiredPlaces} place{requiredPlaces === 1 ? '' : 's'} before publishing.</p>
+          )}
+
+          <div className="card">
+            <h3>Organizer-assigned team points</h3>
+            <p className="muted">Set the points awarded to the winning team for each place in this program. There are no preset values; leave a field blank if no points should be awarded.</p>
+            <div className="grid-2">
+              {[1, 2, 3].map(place => (
+                <label key={place}>{placeNames[place]} place points
+                  <input type="number" min="0" max="10000" step="1" inputMode="numeric"
+                    value={teamPoints[place]}
+                    onChange={event => { setTeamPoints(current => ({ ...current, [place]: event.target.value })); setMessage(''); }}
+                    placeholder="No points assigned" />
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {review.program.results_published && (
+            <div className="card">
+              <h3>Winner certificates</h3>
+              <p className="muted">Generate a personalized PDF certificate for each published podium winner.</p>
+              <div className="grid-2">
+                {[1, 2, 3].map(place => {
+                  const winner = participants.find(row => Number(row.result_place) === place);
+                  return (
+                    <div className="card" key={place}>
+                      <h4>{placeNames[place]} place</h4>
+                      {winner ? (
+                        <>
+                          <p><strong>{winner.student_name}</strong></p>
+                          <p className="muted">{winner.participant_id} · {programLabel(review.program)}</p>
+                          <button disabled={downloadingCertificate != null} onClick={() => generateCertificate(winner)}>
+                            {downloadingCertificate === winner.registration_id ? 'Generating…' : `Generate ${placeNames[place]} certificate`}
+                          </button>
+                        </>
+                      ) : <p className="muted">No winner assigned to this place.</p>}
+                    </div>
+                  );
+                })}
+              </div>
+              <button disabled={downloadingAll || downloadingCertificate != null || ![1,2,3].some(place => participants.some(row => Number(row.result_place) === place))}
+                onClick={generateAllCertificates}>{downloadingAll ? 'Preparing certificates…' : 'Download all winner certificates (ZIP)'}</button>
+              <button className="secondary" disabled={downloadingPoster || ![1,2,3].some(place => participants.some(row => Number(row.result_place) === place))}
+                onClick={generatePoster}>{downloadingPoster ? 'Generating poster…' : 'Download published results poster (PNG)'}</button>
+            </div>
           )}
 
           {participants.length ? (
@@ -174,7 +273,7 @@ export default function OrganizerResults({ programs }) {
                 </thead>
                 <tbody>
                   {participants.map(participant => {
-                    const complete = judgeCount > 0 && participant.judges_submitted >= judgeCount;
+                    const complete = participantComplete(participant);
                     return (
                       <tr key={participant.registration_id}>
                         <td>
@@ -186,16 +285,18 @@ export default function OrganizerResults({ programs }) {
                           <div className="judge-score-list">
                             {review.judges.map(judge => {
                               const score = scoreFor(participant, judge.id);
+                              const assignedToStudent = participant.assigned_judge_ids?.includes(Number(judge.id));
                               return (
                                 <div key={judge.id} className="judge-score-item">
                                   <strong>{judge.name}:</strong>{' '}
                                   {score ? <>
                                     {score.score}/100 ({score.grade}){score.remarks ? <small>{score.remarks}</small> : null}
-                                    {!review.program.results_published && <button className="secondary" disabled={saving} onClick={() => {
+                                    {!score.active && <small className="muted">Historical score · excluded from this student’s average</small>}
+                                    {score.active && <button className="secondary" disabled={saving} onClick={() => {
                                       setEditingScore(score);
                                       setScoreForm({ score: String(score.score), grade: score.grade, remarks: score.remarks || '' });
                                     }}>Edit score</button>}
-                                  </> : <span className="muted">Awaiting score</span>}
+                                  </> : assignedToStudent ? <span className="muted">Awaiting score</span> : <span className="muted">Not assigned to this student</span>}
                                 </div>
                               );
                             })}
@@ -207,7 +308,7 @@ export default function OrganizerResults({ programs }) {
                           <select
                             aria-label={`Place for ${participant.participant_id}`}
                             value={places[participant.registration_id] || ''}
-                            disabled={!!review.program.results_published || !complete}
+                            disabled={participant.judges_submitted === 0}
                             onChange={e => setParticipantPlace(participant.registration_id, e.target.value)}
                           >
                             <option value="">Not placed</option>
@@ -236,7 +337,7 @@ export default function OrganizerResults({ programs }) {
               <label>Remarks (up to 500 characters)</label>
               <textarea maxLength={500} rows={3} value={scoreForm.remarks}
                 onChange={e => setScoreForm(current => ({ ...current, remarks: e.target.value }))} />
-              <p className="muted small">This changes the program average and any automatic rankings. Published results must be unpublished first.</p>
+              <p className="muted small">This recalculates the program average and rankings. If results are published, the public results update when you save.</p>
               <button disabled={saving}>{saving ? 'Saving…' : 'Save scorecard'}</button>
               <button type="button" className="secondary" disabled={saving} onClick={() => setEditingScore(null)}>Cancel</button>
             </form>

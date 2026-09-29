@@ -23,7 +23,7 @@ function timeAgo(sqliteUtc) {
 // newest first. Updates by itself when a judge publishes.
 //   limit  -> show only the latest N programs (home page), with a "see all" link
 //   full   -> show everything (leaderboard page)
-export default function ResultsSection({ limit, full = false }) {
+export default function ResultsSection({ limit, full = false, projector = false }) {
   const [feed, setFeed] = useState(null);
   const [fresh, setFresh] = useState({});
   const timers = useRef([]);
@@ -66,14 +66,15 @@ export default function ResultsSection({ limit, full = false }) {
   const gap = Math.abs(a - b);
 
   return (
-    <section className="results-section" id="results">
+    <section className={`results-section${projector ? ' projector-results' : ''}`} id="results">
       <div className="results-head">
-        <h2>{full ? 'Results & Team Standings' : 'Live Results'}</h2>
+        <h2>{projector ? 'Rendezvous · Live Results' : full ? 'Results & Team Standings' : 'Live Results'}</h2>
+        {projector && <button className="secondary" onClick={() => document.querySelector('.projector-results')?.requestFullscreen?.()}>Full screen</button>}
         <span className="live-pill"><span className="live-dot" />Live</span>
       </div>
       <p className="results-sub">
         Results appear here the moment a judge publishes them.
-        {feed && ` Team points: 1st = ${feed.points[1]}, 2nd = ${feed.points[2]}, 3rd = ${feed.points[3]}.`}
+        {feed?.has_points ? ' Team points are assigned by the organizer for each program.' : ' Team points will appear after the organizer assigns them.'}
       </p>
 
       <div className="team-battle">
@@ -90,6 +91,7 @@ export default function ResultsSection({ limit, full = false }) {
         </div>
         <p className="team-lead">
           {published.length === 0 ? 'Waiting for the first result…'
+            : !feed?.has_points ? 'The organizer has not assigned team points yet'
             : leader ? <><strong style={{ color: leader.color }}>{leader.key}</strong> leads by {gap} {gap === 1 ? 'point' : 'points'}</>
             : 'Both teams are level'}
         </p>
@@ -99,7 +101,7 @@ export default function ResultsSection({ limit, full = false }) {
         <div className="results-empty">
           <span className="live-dot big" />
           <p>No results published yet.</p>
-          <small>Once the judges finish a program and publish it, the winners and team points show up here automatically.</small>
+          <small>Once the organizer publishes a program, its winners and any organizer-assigned team points appear here.</small>
         </div>
       ) : (
         <div className="results-grid">
@@ -123,6 +125,7 @@ export default function ResultsSection({ limit, full = false }) {
                       <div className="podium-who">
                         <strong>{r.name || `Participant ${r.code_letter}`}</strong>
                         {r.members && <small>with {r.members}</small>}
+                        {r.team_points != null && <small>{r.team_points} team {r.team_points === 1 ? 'point' : 'points'}</small>}
                         <TeamBadge name={r.team_name} />
                       </div>
                       <span className="podium-score">{r.average_score}</span>

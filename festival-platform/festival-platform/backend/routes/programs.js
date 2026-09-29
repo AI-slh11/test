@@ -3,6 +3,8 @@ const router = express.Router();
 const db = require('../db');
 const { optionalAuth, requireRole, requireOrganizerOrControlAdmin } = require('../sessionAuth');
 const { assignmentConflict, assignmentConflictForSlot } = require('../judgeAssignments');
+const { recordAudit } = require('../audit');
+const { registrationIsFullyScored, updateJudgingStatus } = require('../registrationJudges');
 
 const CATEGORIES = ['premier', 'junior'];
 const FIRST_NUMBER = { premier: 28, junior: 96 };
@@ -75,7 +77,9 @@ router.post('/', (req, res) => {
     }
     return info.lastInsertRowid;
   });
-  res.status(201).json({ id: create(), number });
+  const id = create();
+  recordAudit(req, 'create', 'program', id, { name, category, number });
+  res.status(201).json({ id, number });
 });
 
 // Assign a judge to a program (manual assignment by organizer)
@@ -86,6 +90,8 @@ router.post('/:id/judges', (req, res) => {
   if (conflict) return res.status(conflict === 'Program not found' ? 404 : 409).json({ error: conflict });
   try {
     db.prepare('INSERT INTO program_judges (program_id, judge_id) VALUES (?,?)').run(req.params.id, judge_id);
+    recordAudit(req, 'assign_judge', 'program', req.params.id, { judge_id });
+    db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(req.params.id).forEach(row => updateJudgingStatus(row.id));
     res.status(201).json({ ok: true });
   } catch {
     res.status(409).json({ error: 'Judge is already assigned to this program' });
@@ -96,7 +102,12 @@ router.delete('/:id/judges/:judgeId', (req, res) => {
   const program = db.prepare('SELECT id, results_published FROM programs WHERE id = ?').get(req.params.id);
   if (!program) return res.status(404).json({ error: 'Program not found' });
   if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before changing judge assignments' });
+  const customPanelCount = db.prepare(`SELECT COUNT(*) c FROM registration_judges rj JOIN registrations r ON r.id = rj.registration_id
+    WHERE r.program_id = ? AND rj.judge_id = ?`).get(program.id, req.params.judgeId).c;
+  if (customPanelCount) return res.status(409).json({ error: `This judge is assigned to ${customPanelCount} custom student panel(s). Remove them from those panels first.` });
   db.prepare('DELETE FROM program_judges WHERE program_id = ? AND judge_id = ?').run(req.params.id, req.params.judgeId);
+  recordAudit(req, 'unassign_judge', 'program', req.params.id, { judge_id: req.params.judgeId });
+  db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(program.id).forEach(row => updateJudgingStatus(row.id));
   res.json({ ok: true });
 });
 
@@ -125,12 +136,15 @@ router.patch('/:id', (req, res) => {
     b.name ?? cur.name, (b.code ?? cur.code).toUpperCase(), type,
     'language' in b ? (b.language || null) : cur.language,
     nextTimeSlot, quota, category, number, cur.id);
+  recordAudit(req, 'edit', 'program', cur.id, { name: b.name ?? cur.name, time_slot: nextTimeSlot });
   res.json({ ok: true });
 });
 
 // Delete a program (also removes its registrations, scores and judge assignments)
 router.delete('/:id', (req, res) => {
+  const program = db.prepare('SELECT name FROM programs WHERE id = ?').get(req.params.id);
   db.prepare('DELETE FROM programs WHERE id = ?').run(req.params.id);
+  if (program) recordAudit(req, 'delete', 'program', req.params.id, { name: program.name });
   res.json({ ok: true });
 });
 
@@ -143,11 +157,7 @@ router.patch('/:id/published', (req, res) => {
   if (on) {
     const assignedJudgeCount = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(prog.id).c;
     const registrations = db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(prog.id);
-    const fullyJudged = assignedJudgeCount > 0 && registrations.length > 0 && registrations.every(r => {
-      const submitted = db.prepare(`SELECT COUNT(*) c FROM scores s JOIN program_judges pj
-        ON pj.judge_id = s.judge_id AND pj.program_id = ? WHERE s.registration_id = ?`).get(prog.id, r.id).c;
-      return submitted >= assignedJudgeCount;
-    });
+    const fullyJudged = assignedJudgeCount > 0 && registrations.length > 0 && registrations.every(r => registrationIsFullyScored(r.id));
     if (!fullyJudged) {
       return res.status(409).json({ error: 'All participants must be fully judged before results can be published' });
     }
@@ -167,6 +177,7 @@ router.patch('/:id/published', (req, res) => {
     db.prepare("UPDATE registrations SET status = 'judged' WHERE program_id = ? AND status = 'results_announced'").run(prog.id);
     io.emit('results:unpublished', { program_id: prog.id });
   }
+  if (req.user?.role === 'organizer' || req.admin) recordAudit(req, on ? 'publish_results' : 'unpublish_results', 'program', prog.id, { program: prog.name });
   res.json({ ok: true });
 });
 

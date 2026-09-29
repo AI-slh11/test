@@ -3,6 +3,8 @@ const router = express.Router();
 const db = require('../db');
 const { issueSession, requireRole, requireOrganizerOrControlAdmin, tokenFromRequest, logout, revokeSessionsForUser } = require('../sessionAuth');
 const { hashPassword, verifyPassword } = require('../credentials');
+const { recordAudit } = require('../audit');
+const { updateJudgingStatus } = require('../registrationJudges');
 
 // Simple code+password login. Returns the user record (no name shown to other roles).
 // Note: this is intentionally minimal (no JWT/hashing) to keep the MVP easy to run;
@@ -41,6 +43,7 @@ router.post('/judges', (req, res) => {
   if (!code || !password || !name) return res.status(400).json({ error: 'code, password, name required' });
   try {
     db.prepare('INSERT INTO users (code, password, name, role) VALUES (?,?,?,\'judge\')').run(code, hashPassword(password), name);
+    recordAudit(req, 'create', 'judge', code, { name, code });
     res.status(201).json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: 'Judge code already exists' });
@@ -60,6 +63,7 @@ router.patch('/judges/:id', (req, res) => {
     db.prepare('UPDATE users SET code=?, password=?, name=? WHERE id=?')
       .run(code || cur.code, password ? hashPassword(password) : cur.password, name || cur.name, cur.id);
     if (code || password) revokeSessionsForUser(cur.id);
+    recordAudit(req, 'edit', 'judge', cur.id, { code: code || cur.code, name: name || cur.name });
     res.json({ ok: true });
   } catch (e) {
     res.status(400).json({ error: 'That judge code is already in use' });
@@ -73,18 +77,19 @@ router.delete('/judges/:id', (req, res) => {
     WHERE pj.judge_id = ? AND p.results_published = 1 LIMIT 1`).get(judge.id);
   if (publishedProgram) return res.status(409).json({ error: `Unpublish ${publishedProgram.name} before removing this judge` });
   const affectedRegistrations = db.prepare(`SELECT DISTINCT r.id FROM registrations r
-    LEFT JOIN scores s ON s.registration_id = r.id WHERE s.judge_id = ?`).all(judge.id).map(row => row.id);
+    LEFT JOIN program_judges pj ON pj.program_id = r.program_id
+    LEFT JOIN registration_judges rj ON rj.registration_id = r.id
+    LEFT JOIN scores s ON s.registration_id = r.id
+    WHERE pj.judge_id = ? OR rj.judge_id = ? OR s.judge_id = ?`).all(judge.id, judge.id, judge.id).map(row => row.id);
+  const emptiedPanels = db.prepare(`SELECT rjp.registration_id FROM registration_judge_panels rjp
+    JOIN registration_judges rj ON rj.registration_id = rjp.registration_id
+    WHERE rj.judge_id = ? AND (SELECT COUNT(*) FROM registration_judges x WHERE x.registration_id = rjp.registration_id) = 1`).all(judge.id);
+  const deleteEmptyPanelMarker = db.prepare('DELETE FROM registration_judge_panels WHERE registration_id = ?');
+  emptiedPanels.forEach(row => deleteEmptyPanelMarker.run(row.registration_id));
   revokeSessionsForUser(judge.id);
+  recordAudit(req, 'delete', 'judge', judge.id, {});
   db.prepare("DELETE FROM users WHERE id = ? AND role = 'judge'").run(judge.id);
-  const markJudged = db.prepare(`UPDATE registrations SET status = 'judged' WHERE id = ?
-    AND (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id) > 0
-    AND (SELECT COUNT(*) FROM scores WHERE registration_id = registrations.id) >=
-      (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id)`);
-  const reopen = db.prepare(`UPDATE registrations SET status = 'slot_assigned' WHERE id = ? AND status = 'judged'
-    AND ((SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id) = 0
-      OR (SELECT COUNT(*) FROM scores WHERE registration_id = registrations.id) <
-        (SELECT COUNT(*) FROM program_judges WHERE program_id = registrations.program_id))`);
-  affectedRegistrations.forEach(id => { reopen.run(id); markJudged.run(id); });
+  affectedRegistrations.forEach(id => updateJudgingStatus(id));
   res.json({ ok: true });
 });
 

@@ -10,9 +10,9 @@ const WORD = 'RENDEZVOUS';
 const TEAM = [
   { name: 'Shanib Abdulla', role: 'Festival Coordinator', photo: '/team/shanib.jpg', accent: '#19bb47' },
   { name: 'Hashir Ashraf', role: 'Curator in Action', photo: '/team/hashir.jpg', accent: '#01b998' },
-  { name: 'Miqdad Ameen', role: 'Finance Officer', photo: '/team/ameen.jpg', accent: '#aee515' },
+  { name: 'Sinan Majeed', role: 'Finance Officer', accent: '#aee515' },
   { name: 'Faheem Abdul Azeez', role: 'Assistant Coordinator', photo: '/team/faheem.jpg', accent: '#017d8b' },
-  { name: 'Muhammed Ibrahim', role: 'Assistant Coordinator', photo: '/team/ibrahim.jpg', accent: '#64d431' }
+  { name: 'Ashad Ali', role: 'Assistant Coordinator', accent: '#64d431' }
 ];
 const POP_COLORS = ['#017d8b', '#19bb47', '#e2fa04'];
 

@@ -39,7 +39,7 @@ export default function JudgePortal() {
 
     const onNew = (payload) => {
       if (String(payload.program_id) !== String(activeProgram)) return;
-      setList(prev => [...prev, payload]);
+      api.judgeView(activeProgram).then(setList).catch(() => {});
     };
     const onScore = () => {
       api.judgeView(activeProgram).then(setList).catch(() => {});

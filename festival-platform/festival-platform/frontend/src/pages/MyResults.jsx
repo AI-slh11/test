@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
@@ -17,6 +17,33 @@ export default function MyResults() {
   const [registrations, setRegistrations] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [alertsOn, setAlertsOn] = useState(false);
+  const [alertMessage, setAlertMessage] = useState('');
+  const knownResults = useRef(new Set());
+
+  useEffect(() => {
+    if (!alertsOn || !studentId) return undefined;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const data = await api.studentRegistrations(studentId);
+        if (!active) return;
+        const ready = data.registrations.filter(item => item.results_published && item.result);
+        for (const item of ready) {
+          const key = `${item.participant_id}:${item.result.rank}`;
+          if (!knownResults.current.has(key)) {
+            knownResults.current.add(key);
+            setAlertMessage(`New result: ${item.program.name} — ${places[item.result.rank] || `Rank ${item.result.rank}`}`);
+            if ('Notification' in window && Notification.permission === 'granted') {
+              new Notification('Festival result published', { body: `${item.program.name}: ${places[item.result.rank] || `Rank ${item.result.rank}`}` });
+            }
+          }
+        }
+      } catch { /* The page stays usable while the API reconnects. */ }
+    };
+    const timer = window.setInterval(refresh, 30000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [alertsOn, studentId]);
 
   const lookup = async (event) => {
     event.preventDefault();
@@ -26,6 +53,8 @@ export default function MyResults() {
     try {
       const data = await api.studentRegistrations(studentId);
       setRegistrations(data.registrations);
+      knownResults.current = new Set(data.registrations.filter(item => item.results_published && item.result)
+        .map(item => `${item.participant_id}:${item.result.rank}`));
     } catch (err) {
       setError(err.message || 'Could not look up your programs. Please try again.');
     } finally {
@@ -58,6 +87,15 @@ export default function MyResults() {
           {error && <p className="error" role="alert">{error}</p>}
           <button type="submit" disabled={loading}>{loading ? 'Searching…' : 'Find my programs'}</button>
         </form>
+        {registrations?.length > 0 && <div className="card"><h3>Result alerts</h3>
+          <p className="muted small">Keep this page open to check for newly published results. Browser notifications require permission.</p>
+          {alertMessage && <p className="success" role="status">{alertMessage}</p>}
+          <button type="button" className={alertsOn ? 'secondary' : ''} onClick={async () => {
+            if (alertsOn) { setAlertsOn(false); return; }
+            if ('Notification' in window && Notification.permission === 'default') await Notification.requestPermission();
+            setAlertsOn(true);
+          }}>{alertsOn ? 'Turn off result alerts' : 'Notify me when results are published'}</button>
+        </div>}
       </div>
 
       {registrations && (

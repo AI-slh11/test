@@ -10,11 +10,12 @@ export default function GreenRoom() {
   const [activeProgram, setActiveProgram] = useState('');
   const [registrations, setRegistrations] = useState([]);
   const [results, setResults] = useState(null);
-  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
+  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', code_letter: '', is_team: false, team_members: '', language: '', judge_ids: [] });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [downloadingCertificate, setDownloadingCertificate] = useState(null);
 
   const loadPrograms = () => api.listPrograms().then(setPrograms).catch(() => {});
   useEffect(() => { loadPrograms(); api.listJudges().then(setJudges).catch(() => {}); }, []);
@@ -28,6 +29,9 @@ export default function GreenRoom() {
   useEffect(() => { loadRegistrations(activeProgram); }, [activeProgram]);
 
   const program = programs.find(p => String(p.id) === String(activeProgram));
+  const takenLetters = new Set(registrations.map(registration => registration.code_letter));
+  const allCodeLetters = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))];
+  const availableLetters = allCodeLetters.filter(letter => !takenLetters.has(letter));
   const assignmentConflicts = program ? form.judge_ids.flatMap(judgeId => {
     const judge = judges.find(item => String(item.id) === String(judgeId));
     if (!judge || !program.time_slot?.trim()) return [];
@@ -47,7 +51,7 @@ export default function GreenRoom() {
     }
     try {
       await api.register({ ...form, program_id: activeProgram, source: 'onsite' });
-      setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
+      setForm({ student_name: '', student_id: '', team_name: '', code_letter: '', is_team: false, team_members: '', language: '', judge_ids: [] });
       loadRegistrations(activeProgram);
       loadPrograms();
       setNotice('Student registered.');
@@ -109,6 +113,18 @@ export default function GreenRoom() {
       : [...current.judge_ids, judgeId]
   }));
 
+  const downloadWinnerCertificate = async (registrationId) => {
+    setDownloadingCertificate(registrationId);
+    setError('');
+    try {
+      await api.downloadCertificate(activeProgram, registrationId);
+    } catch (err) {
+      setError(err.message || 'Could not generate certificate.');
+    } finally {
+      setDownloadingCertificate(null);
+    }
+  };
+
   return (
     <div>
       <h2>Green Room — Organizer Control</h2>
@@ -132,6 +148,12 @@ export default function GreenRoom() {
                 <input value={form.student_name} onChange={e => setForm({ ...form, student_name: e.target.value })} required />
                 <label>Student ID</label>
                 <input value={form.student_id} onChange={e => setForm({ ...form, student_id: e.target.value })} required />
+                <label>Student’s chosen performance code</label>
+                <select value={form.code_letter} onChange={e => setForm({ ...form, code_letter: e.target.value })} required disabled={!availableLetters.length}>
+                  <option value="">{availableLetters.length ? 'Choose an available letter…' : 'No code letters available'}</option>
+                  {availableLetters.map(letter => <option key={letter} value={letter}>{letter}</option>)}
+                </select>
+                <p className="muted small">The student chooses this code. It determines performance order and cannot be shared within a program.</p>
                 <label>Team</label>
                 <select value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} required>
                   <option value="">Select team...</option>
@@ -153,7 +175,7 @@ export default function GreenRoom() {
                 )}
                 <fieldset className="card" style={{ margin: '12px 0' }}>
                   <legend>Assign judges with this registration</legend>
-                  <p className="muted small">Selected judges will be assigned to this program as the student is registered. Same-time-slot conflicts are blocked with an alert.</p>
+                  <p className="muted small">Selected judges will be assigned to this student and made available in the program. Existing students keep their current panels; time-slot conflicts are blocked with an alert.</p>
                   {judges.map(judge => (
                     <label key={judge.id} className="checkbox">
                       <input type="checkbox" checked={form.judge_ids.includes(judge.id)}
@@ -186,7 +208,7 @@ export default function GreenRoom() {
             <h3>All Registrations for {programLabel(program)}</h3>
             {program.results_published && <p className="muted">Unpublish this program from Results before editing or removing registrations.</p>}
             <table>
-              <thead><tr><th>Code</th><th>Name</th><th>Student ID</th><th>Team</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
+              <thead><tr><th>Code</th><th>Name</th><th>Student ID</th><th>Team</th><th>Assigned judges</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {registrations.map(r => editing?.id === r.id ? (
                   <tr key={r.id}>
@@ -204,6 +226,7 @@ export default function GreenRoom() {
                       {editing.values.is_team && <input aria-label="Group members" placeholder="Team members" value={editing.values.team_members}
                         onChange={e => setEditing(current => ({ ...current, values: { ...current.values, team_members: e.target.value } }))} />}
                     </td>
+                    <td>—</td>
                     <td>{r.source}</td>
                     <td>{r.status}</td>
                     <td>
@@ -217,6 +240,8 @@ export default function GreenRoom() {
                     <td>{r.student_name}</td>
                     <td>{r.student_id}</td>
                     <td><TeamBadge name={r.team_name} /></td>
+                    <td><RegistrationJudgeEditor registration={r} judges={program?.judges || []}
+                      disabled={program.results_published} onSaved={() => loadRegistrations(activeProgram)} /></td>
                     <td>{r.source}</td>
                     <td>
                       <select aria-label={`Status for ${r.participant_id}`} value={r.status} disabled={program.results_published}
@@ -233,7 +258,7 @@ export default function GreenRoom() {
                     </td>
                   </tr>
                 ))}
-                {registrations.length === 0 && <tr><td colSpan={7} className="muted">No registrations for this program yet.</td></tr>}
+                {registrations.length === 0 && <tr><td colSpan={8} className="muted">No registrations for this program yet.</td></tr>}
               </tbody>
             </table>
           </div>
@@ -253,7 +278,11 @@ export default function GreenRoom() {
                       <td>{r.average_score}</td>
                       <td>{r.judges_submitted}</td>
                       <td>{r.rank <= 3
-                        ? (program.results_published ? <a href={api.certificateUrl(activeProgram, r.registration_id)}>Download</a> : 'Available after publication')
+                        ? (program.results_published
+                          ? <button className="secondary" disabled={downloadingCertificate != null} onClick={() => downloadWinnerCertificate(r.registration_id)}>
+                              {downloadingCertificate === r.registration_id ? 'Generating…' : 'Download certificate'}
+                            </button>
+                          : 'Available after publication')
                         : '—'}</td>
                     </tr>
                   ))}
@@ -265,5 +294,58 @@ export default function GreenRoom() {
       )}
     </div>
   );
+}
+
+function RegistrationJudgeEditor({ registration, judges, disabled, onSaved }) {
+  const assignedKey = (registration.assigned_judge_ids || []).map(Number).sort((a, b) => a - b).join(',');
+  const [selected, setSelected] = useState(() => (registration.assigned_judge_ids || []).map(Number));
+  const [custom, setCustom] = useState(!!registration.judge_panel_custom);
+  const [savingPanel, setSavingPanel] = useState(false);
+  const [panelError, setPanelError] = useState('');
+  const [panelMessage, setPanelMessage] = useState('');
+
+  useEffect(() => {
+    setSelected((registration.assigned_judge_ids || []).map(Number));
+    setCustom(!!registration.judge_panel_custom);
+  }, [registration.id, assignedKey, registration.judge_panel_custom]);
+
+  const toggle = (judgeId) => setSelected(current => current.includes(Number(judgeId))
+    ? current.filter(id => id !== Number(judgeId)) : [...current, Number(judgeId)]);
+  const save = async () => {
+    setSavingPanel(true); setPanelError(''); setPanelMessage('');
+    try {
+      const result = await api.setRegistrationJudges(registration.id, selected);
+      setSelected(result.assigned_judge_ids); setCustom(true); setPanelMessage('Student panel saved.'); onSaved();
+    } catch (error) { setPanelError(error.message); }
+    finally { setSavingPanel(false); }
+  };
+  const reset = async () => {
+    setSavingPanel(true); setPanelError(''); setPanelMessage('');
+    try {
+      const result = await api.resetRegistrationJudges(registration.id);
+      setSelected(result.assigned_judge_ids); setCustom(false); setPanelMessage('Using the program panel.'); onSaved();
+    } catch (error) { setPanelError(error.message); }
+    finally { setSavingPanel(false); }
+  };
+
+  const labels = (registration.assigned_judge_ids || []).map(id => judges.find(judge => Number(judge.id) === Number(id))?.name).filter(Boolean);
+  return <details className="student-judge-editor">
+    <summary>{labels.length ? labels.join(', ') : 'No judges assigned'} <small>{custom ? '· Custom' : '· Program panel'}</small></summary>
+    <div className="student-judge-options">
+      {judges.map(judge => <label key={judge.id} className="checkbox">
+        <input type="checkbox" checked={selected.includes(Number(judge.id))} disabled={disabled || savingPanel}
+          onChange={() => toggle(judge.id)} />{judge.name}
+      </label>)}
+      {!judges.length && <p className="muted small">Assign judges to this program first.</p>}
+    </div>
+    <small className="muted">Changing the panel recalculates this student’s judging progress. Removed judges’ scorecards remain in history but no longer count toward the average.</small>
+    {panelError && <p className="error" role="alert">{panelError}</p>}
+    {panelMessage && <p className="success" role="status">{panelMessage}</p>}
+    <button type="button" disabled={disabled || savingPanel || !judges.length || !selected.length}
+      onClick={save}>{savingPanel ? 'Saving…' : 'Save student panel'}</button>
+    {custom && <button type="button" className="secondary" disabled={disabled || savingPanel}
+      onClick={reset}>Use program panel</button>}
+    {disabled && <small className="muted">Unpublish results to edit the panel.</small>}
+  </details>;
 }
 

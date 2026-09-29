@@ -61,7 +61,8 @@ function AuthProvider({ children }) {
 
 function RequireRole({ role, children }) {
   const { user } = useAuth();
-  if (!user || user.role !== role) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!user || user.role !== role) return <Navigate to={`/login?returnTo=${encodeURIComponent(`${location.pathname}${location.search}`)}`} replace />;
   return children;
 }
 
@@ -75,6 +76,7 @@ function Nav() {
         <Link to="/">Home</Link>
         <Link to="/register">Student Registration</Link>
         <Link to="/leaderboard">Leaderboard</Link>
+        <Link to="/live-results">Live Display</Link>
         <Link to="/my-results">My Results</Link>
         {user?.role === 'organizer' && <Link to="/admin/dashboard">Dashboard</Link>}
         {user?.role === 'organizer' && <Link to="/green-room">Green Room</Link>}
@@ -110,9 +112,11 @@ export default function App() {
           <Route path="/login" element={<Login />} />
           <Route path="/register" element={<Register />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
+          <Route path="/live-results" element={<Leaderboard live />} />
           <Route path="/my-results" element={<MyResults />} />
           <Route path="/admin/dashboard" element={<RequireRole role="organizer"><AdminDashboard /></RequireRole>} />
           <Route path="/green-room" element={<RequireRole role="organizer"><GreenRoom /></RequireRole>} />
+          <Route path="/check-in" element={<RequireRole role="organizer"><AdminDashboard initialTab="Check-in" /></RequireRole>} />
           <Route path="/admin/programs" element={<RequireRole role="organizer"><ProgramsAdmin /></RequireRole>} />
           <Route path="/judge" element={<RequireRole role="judge"><JudgePortal /></RequireRole>} />
         </Routes>
@@ -120,5 +124,4 @@ export default function App() {
     </AuthProvider>
   );
 }
-
 

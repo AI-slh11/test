@@ -1,5 +1,5 @@
 // Official Rendezvous'26 program lists. Numbers are the festival's program numbers.
-// Premier: stage 28-41, written 42-59.  Junior: stage 96-120, written 121-161. Seeded once on first run (see db.js);
+// Premier: stage 28-41 and 60-61, written 42-59. Junior: stage 96-120 and 162-163, written 121-161. Seeded once on first run (see db.js);
 // after that the admin owns the list and can add / edit / delete freely.
 
 const PREMIER = [
@@ -42,6 +42,11 @@ const JUNIOR_STAGE = [
   [116, 'Ibarath Reading'], [117, "Qur'an Mastery"], [118, 'Hifzul Muthoon'], [119, 'Thadrees'], [120, "Musha'ara"]
 ];
 
+const EXTRA_STAGE = [
+  ['premier', [[60, 'Qawwali'], [61, 'Group Song']], 'P'],
+  ['junior', [[162, 'Qawwali'], [163, 'Group Song']], 'J']
+];
+
 // Programs performed/shown live are "stage"; everything else is judged from a submission.
 const STAGE_NAMES = new Set(['Swimming', 'Shoot Out', 'Documentary Presentation', 'Talent Test']);
 const LANGS = ['Malayalam', 'English', 'Arabic', 'Urdu'];
@@ -74,6 +79,7 @@ function seedPrograms(db) {
     (name) => (STAGE_NAMES.has(name) ? 'stage' : 'writing'));
   seedBatch(db, 'programs_seeded_v2_stage', [['premier', PREMIER_STAGE, 'P'], ['junior', JUNIOR_STAGE, 'J']],
     () => 'stage');
+  seedBatch(db, 'programs_seeded_v3_extra_stage', EXTRA_STAGE, () => 'stage');
 }
 
 module.exports = { seedPrograms, PREMIER, JUNIOR, PREMIER_STAGE, JUNIOR_STAGE };
