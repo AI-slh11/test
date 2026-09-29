@@ -130,12 +130,6 @@ export async function downloadResultsPoster({ program, winners }) {
       ctx.font = '400 16px Arial, sans-serif';
       wrappedText(ctx, `With ${winner.team_members}`, 288, detailY + 29, 680, 22, 2);
     }
-    if (winner.average_score != null) {
-      ctx.textAlign = 'right';
-      ctx.fillStyle = accent;
-      ctx.font = '700 19px Arial, sans-serif';
-      ctx.fillText(`SCORE  ${winner.average_score}`, 974, y + 169);
-    }
   });
 
   const footerWidth = 520;

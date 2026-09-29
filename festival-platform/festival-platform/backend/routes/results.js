@@ -322,7 +322,7 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
   const footerPath = path.join(brandDir, 'footer-white.png');
   if (fs.existsSync(footerPath)) {
     const footerWidth = 300;
-    doc.image(footerPath, (width - footerWidth) / 2, height - 53, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
+    doc.image(footerPath, (width - footerWidth) / 2, height - 76, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
   }
   doc.end();
 });
