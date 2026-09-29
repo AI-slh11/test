@@ -105,8 +105,8 @@ export default function MyResults() {
               <h3>No registrations found</h3>
               <p className="muted">Check the Student ID and try again. It must match the ID used during registration.</p>
             </div>
-          ) : registrations.map(item => (
-            <article className="card student-result-card" key={item.participant_id}>
+            ) : registrations.map((item, index) => (
+            <article className="card student-result-card" key={item.participant_id || `${item.program.id}-${index}`}>
               <div className="student-result-heading">
                 <div>
                   <h3>{programLabel(item.program)}</h3>
@@ -114,7 +114,8 @@ export default function MyResults() {
                 </div>
                 <TeamBadge name={item.team_name} />
               </div>
-              <p><strong>Participant ID:</strong> {item.participant_id}</p>
+              {item.code_assigned ? <><p><strong>Performance code:</strong> {item.code_letter}</p><p><strong>Participant ID:</strong> {item.participant_id}</p></>
+                : <p className="muted">A performance code is waiting for organizer assignment.</p>}
               <p><strong>Registration:</strong> {statusLabels[item.registration_status] || 'Registered'}</p>
               {item.results_published ? (
                 item.result ? (
@@ -132,4 +133,3 @@ export default function MyResults() {
     </section>
   );
 }
-

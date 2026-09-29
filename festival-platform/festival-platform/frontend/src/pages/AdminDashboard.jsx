@@ -214,7 +214,7 @@ export default function AdminDashboard({ initialTab = 'Overview' }) {
             <tbody>
               {regs.map(r => isEditing('reg', r.id) ? (
                 <tr key={r.id}>
-                  <td>{r.code_letter}</td><td>{r.participant_id}</td>
+                  <td>{r.code_assignment_pending ? 'Unassigned' : r.code_letter}</td><td>{r.code_assignment_pending ? '—' : r.participant_id}</td>
                   <td>{cell('reg', r.id, 'student_name')}</td>
                   <td>{cell('reg', r.id, 'student_id', 'text', 130)}</td>
                   <td>
@@ -231,7 +231,7 @@ export default function AdminDashboard({ initialTab = 'Overview' }) {
                 </tr>
               ) : (
                 <tr key={r.id}>
-                  <td>{r.code_letter}</td><td>{r.participant_id}</td><td>{r.student_name}</td><td>{r.student_id}</td><td><TeamBadge name={r.team_name} /></td><td>{r.source}</td>
+                  <td>{r.code_assignment_pending ? 'Unassigned' : r.code_letter}</td><td>{r.code_assignment_pending ? '—' : r.participant_id}</td><td>{r.student_name}</td><td>{r.student_id}</td><td><TeamBadge name={r.team_name} /></td><td>{r.source}</td>
                   <td>
                     <button className="secondary" onClick={() => setQrRegistration(r)}>QR</button>
                     <button onClick={() => startEdit('reg', r, ['student_name', 'student_id', 'team_name'])}>Edit</button>

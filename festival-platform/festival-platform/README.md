@@ -19,9 +19,9 @@ No payment/financial features are included, per the plan.
 
 - **Programs/Competitions:** organizer creates writing (pre-submitted) or stage (live) programs with a short code and time slot.
 - **Student Registration:** one shared form for stage & writing programs; open to all campus members; both online (self-service) and on-site ("Green Room", organizer-entered) registration.
-- **Code Letters & Participant IDs:** students choose an available performance code per program (A–Z, then AA–ZZ); the code sets their order, not signup time. Participant ID format `FEST-[ProgramCode]-[RegNumber]-[Code]`, e.g. `FEST-ESH-001-A`.
+- **Code Letters & Participant IDs:** registrations are saved first without a performance code. Organizers assign a unique code per program in Green Room after registration (A–Z, then AA–ZZ); the code sets performance order. Participant ID format `FEST-[ProgramCode]-[RegNumber]-[Code]`, e.g. `FEST-ESH-001-A`.
 - **Judge Accounts:** system-issued judge codes (seeded examples below); organizers manually assign judges to programs.
-- **Real-Time Judge Portal:** WebSocket push (Socket.IO) — new Green Room registrations appear in the judge's list within ~1-2 seconds, no refresh needed.
+- **Real-Time Judge Portal:** WebSocket push (Socket.IO) — newly code-assigned registrations appear in the assigned judges' lists without a refresh.
 - **Anonymized Judging:** judges see Code Letter only, never student name/ID; they pick who to judge next (no forced order).
 - **Panel Scoring:** numeric score (0-100) + letter grade (A-F) + remarks (≤500 chars); one submission per judge per participant, final — no revision/appeal endpoint exists.
 - **Averaging & Confidentiality:** final rank uses the average of submitted judge scores. Judge scorecards are available to organizers for result review and correction; judges and the public do not see other judges' individual scorecards.
@@ -36,7 +36,7 @@ No payment/financial features are included, per the plan.
 - **Bulk certificates:** download the published podium certificates together as one ZIP file.
 - **Live display:** `/live-results` shows published results with larger projector-friendly type and a full-screen option.
 - **Student result alerts:** on *My Results*, students can opt in to browser notifications while keeping that page open.
-- **CSV tools:** organizers can import registration CSV rosters and export all registrations. Imported rows must include `code_letter`; students choose an available A–Z (then AA–ZZ) performance code during registration. Codes are unique per program and determine performance order. The import reports invalid/duplicate rows without dropping successful records.
+- **CSV tools:** organizers can import registration CSV rosters and export all registrations. Imported rows do not need a `code_letter`; imported students appear as unassigned until an organizer assigns their codes in Green Room. Codes are unique per program and determine performance order. The import reports invalid/duplicate rows without dropping successful records.
 - **Activity history:** the organizer dashboard records registration changes, judge and program changes, score corrections, check-ins, podium edits, and publication actions.
 
 ## Project structure
@@ -104,7 +104,7 @@ npm run dev         # http://localhost:5173, proxies /api to :4000
 
 1. Organizer logs in → **Programs** → creates competitions (e.g. "Essay Writing (English)", type `writing`; "Qawwali", type `stage`, category `General`).
 2. Organizer assigns judges to each program from **Green Room**.
-3. Students self-register online at `/register`, or organizer adds them on-site from **Green Room** — both get a Code Letter + Participant ID instantly.
+3. Students self-register online at `/register`, or an organizer adds them on-site from **Green Room**. After registration, assign each entry a Code Letter in the Green Room registrations list; the Participant ID is generated at that point.
 4. Judge logs in, opens **Judge Portal**, selects the program — sees the anonymized, live-updating list and scores whoever they pick.
 5. Once every assigned judge has scored each participant, organizers can review averages privately in the Green Room.
 6. An organizer explicitly publishes the completed results from **Dashboard → Programs**. Only then do they appear on the home page and leaderboard, and certificates become available.

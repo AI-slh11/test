@@ -11,6 +11,7 @@ const { assignedJudgeIds, updateJudgingStatus } = require('../registrationJudges
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 
 const CODE_LETTER_RE = /^[A-Z]{1,2}$/;
+const isPendingCode = (value) => String(value || '').startsWith('PENDING-');
 const CODE_LETTER_OPTIONS = [
   ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
   ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))
@@ -21,7 +22,7 @@ router.get('/available-letters', (req, res) => {
   if (!Number.isInteger(programId) || programId < 1) return res.status(400).json({ error: 'program_id required' });
   const program = db.prepare('SELECT id FROM programs WHERE id = ?').get(programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
-  const taken = db.prepare('SELECT code_letter FROM registrations WHERE program_id = ?').all(programId).map(row => row.code_letter);
+  const taken = db.prepare('SELECT code_letter FROM registrations WHERE program_id = ?').all(programId).map(row => row.code_letter).filter(letter => !isPendingCode(letter));
   res.json({ taken, available: CODE_LETTER_OPTIONS.filter(letter => !taken.includes(letter)) });
 });
 
@@ -29,7 +30,6 @@ router.get('/available-letters', (req, res) => {
 // registration and public online self-registration; `source` distinguishes them.
 router.post('/', optionalAuth, (req, res) => {
   const { program_id, student_name, student_id, is_team, team_members, language, source, team_name, team_leader_name, team_leader_id } = req.body;
-  const codeLetter = String(req.body?.code_letter || '').trim().toUpperCase();
   if (req.body?.team_leader_registration && req.user?.role !== 'organizer' && !req.admin) {
     return res.status(403).json({ error: 'Team leader roster registration must be submitted by an organizer' });
   }
@@ -43,7 +43,6 @@ router.post('/', optionalAuth, (req, res) => {
   if (!program_id || !student_name || !student_id) {
     return res.status(400).json({ error: 'program_id, student_name, student_id required' });
   }
-  if (!CODE_LETTER_RE.test(codeLetter)) return res.status(400).json({ error: 'Choose one available code letter from A to Z' });
   if (!TEAMS.includes(team_name)) {
     return res.status(400).json({ error: `Please choose a team: ${TEAMS.join(' or ')}` });
   }
@@ -67,19 +66,12 @@ router.post('/', optionalAuth, (req, res) => {
 
   const duplicate = db.prepare('SELECT id FROM registrations WHERE program_id = ? AND student_id = ?').get(program_id, studentId);
   if (duplicate) return res.status(409).json({ error: 'This Student ID is already registered for this program' });
-  const letterOwner = db.prepare('SELECT student_name FROM registrations WHERE program_id = ? AND code_letter = ?').get(program_id, codeLetter);
-  if (letterOwner) return res.status(409).json({ error: `Code letter ${codeLetter} has already been chosen for this program. Please choose another available letter.` });
-
   const existingCount = db.prepare('SELECT COUNT(*) c FROM registrations WHERE program_id = ?').get(program_id).c;
   if (program.quota && existingCount >= program.quota) {
     return res.status(409).json({ error: `Registration closed — this program is full (${program.quota} spots)` });
   }
-  let participantNumber = existingCount + 1;
-  let participantId = `FEST-${program.code}-${String(participantNumber).padStart(3, '0')}-${codeLetter}`;
-  while (db.prepare('SELECT 1 FROM registrations WHERE participant_id = ?').get(participantId)) {
-    participantNumber++;
-    participantId = `FEST-${program.code}-${String(participantNumber).padStart(3, '0')}-${codeLetter}`;
-  }
+  const pendingCode = `PENDING-${require('crypto').randomBytes(8).toString('hex').toUpperCase()}`;
+  const pendingParticipantId = `FEST-${program.code}-${pendingCode}`;
 
   const register = db.transaction(() => {
     const info = db.prepare(`
@@ -87,7 +79,7 @@ router.post('/', optionalAuth, (req, res) => {
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
       program_id, student_name.trim(), studentId, is_team ? 1 : 0, team_members || null,
-      language || program.language || null, codeLetter, participantId, source === 'onsite' ? 'onsite' : 'online', team_name,
+      language || program.language || null, pendingCode, pendingParticipantId, source === 'onsite' ? 'onsite' : 'online', team_name,
       team_leader_name ? String(team_leader_name).trim().slice(0, 120) : null,
       team_leader_id ? String(team_leader_id).trim().toUpperCase().slice(0, 12) : null
     );
@@ -115,28 +107,22 @@ router.post('/', optionalAuth, (req, res) => {
   let info;
   try { info = register(); }
   catch (error) {
-    if (String(error.message).includes('UNIQUE constraint failed: registrations.program_id, registrations.code_letter')) {
-      return res.status(409).json({ error: `Code letter ${codeLetter} was just taken. Please choose another available letter.` });
-    }
     return res.status(409).json({ error: 'Registration could not be saved. Check duplicate student IDs and judge assignments.' });
   }
 
   const registration = db.prepare('SELECT * FROM registrations WHERE id = ?').get(info.lastInsertRowid);
   if (!req.user && !req.admin) req.auditActor = team_leader_id ? 'Team leader' : 'Student';
-  recordAudit(req, 'register', 'registration', registration.id, { participant_id: participantId, program_id });
+  const organizer = req.user?.role === 'organizer' || !!req.admin;
+  recordAudit(req, 'register', 'registration', registration.id, { program_id, code_assignment_pending: true });
 
   // Real-time push to any judge portal open on this program (Green Room -> Judge Portal sync)
   const io = req.app.get('io');
-  io.to(`program:${program_id}`).emit('registration:new', {
-    id: registration.id,
-    program_id,
-    code_letter: registration.code_letter,
-    participant_id: registration.participant_id,
-    status: registration.status,
-    is_team: !!registration.is_team
-  });
-
-  res.status(201).json({ registration });
+  res.status(201).json({ registration: {
+    id: registration.id, program_id: registration.program_id, student_name: registration.student_name,
+    team_name: registration.team_name, code_letter: null, participant_id: null,
+    ...(organizer ? { student_id: registration.student_id, source: registration.source } : {}),
+    code_assignment_pending: true
+  } });
 });
 
 // Organizer-managed roster import for team leaders; rows follow the standard registration fields.
@@ -148,28 +134,22 @@ router.post('/bulk', requireOrganizerOrControlAdmin, (req, res) => {
     const row = rows[index];
     const programId = Number(row.program_id);
     const studentId = String(row.student_id || '').trim().toUpperCase();
-    const codeLetter = String(row.code_letter || '').trim().toUpperCase();
-    if (!Number.isInteger(programId) || !STUDENT_ID_RE.test(studentId) || !String(row.student_name || '').trim() || !TEAMS.includes(row.team_name) || !CODE_LETTER_RE.test(codeLetter)) {
-      results.push({ row: index + 1, error: 'Required fields: program_id, student_name, valid student_id, team_name, and a chosen code_letter (A–Z)' }); continue;
+    if (!Number.isInteger(programId) || !STUDENT_ID_RE.test(studentId) || !String(row.student_name || '').trim() || !TEAMS.includes(row.team_name)) {
+      results.push({ row: index + 1, error: 'Required fields: program_id, student_name, valid student_id, and team_name' }); continue;
     }
     const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
     if (!program || program.results_published) { results.push({ row: index + 1, error: !program ? 'Program not found' : 'Program results are published' }); continue; }
     if (db.prepare('SELECT 1 FROM registrations WHERE program_id = ? AND student_id = ?').get(programId, studentId)) { results.push({ row: index + 1, error: 'Duplicate Student ID for this program' }); continue; }
-    if (db.prepare('SELECT 1 FROM registrations WHERE program_id = ? AND code_letter = ?').get(programId, codeLetter)) { results.push({ row: index + 1, error: `Code letter ${codeLetter} is already taken for this program` }); continue; }
     const count = db.prepare('SELECT COUNT(*) c FROM registrations WHERE program_id = ?').get(programId).c;
     if (program.quota && count >= program.quota) { results.push({ row: index + 1, error: 'Program quota reached' }); continue; }
-    let participantNumber = count + 1;
-    let participantId = `FEST-${program.code}-${String(participantNumber).padStart(3, '0')}-${codeLetter}`;
-    while (db.prepare('SELECT 1 FROM registrations WHERE participant_id = ?').get(participantId)) {
-      participantNumber++;
-      participantId = `FEST-${program.code}-${String(participantNumber).padStart(3, '0')}-${codeLetter}`;
-    }
+    const pendingCode = `PENDING-${require('crypto').randomBytes(8).toString('hex').toUpperCase()}`;
+    const pendingParticipantId = `FEST-${program.code}-${pendingCode}`;
     try {
       const info = db.prepare(`INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name)
         VALUES (?,?,?,?,?,?,?,?,?,?)`).run(programId, String(row.student_name).trim(), studentId, row.is_team ? 1 : 0,
-        row.team_members || null, row.language || program.language || null, codeLetter, participantId, 'onsite', row.team_name);
-      results.push({ row: index + 1, participant_id: participantId, code_letter: codeLetter, registration_id: info.lastInsertRowid });
-      recordAudit(req, 'bulk_register', 'registration', info.lastInsertRowid, { participant_id: participantId, program_id: programId });
+        row.team_members || null, row.language || program.language || null, pendingCode, pendingParticipantId, 'onsite', row.team_name);
+      results.push({ row: index + 1, registration_id: info.lastInsertRowid, code_assignment_pending: true });
+      recordAudit(req, 'bulk_register', 'registration', info.lastInsertRowid, { program_id: programId, code_assignment_pending: true });
     } catch { results.push({ row: index + 1, error: 'Could not save row; check duplicate fields' }); }
   }
   res.status(201).json({ created: results.filter(row => row.registration_id).length, results });
@@ -183,9 +163,49 @@ router.get('/', requireOrganizerOrControlAdmin, (req, res) => {
     : db.prepare('SELECT * FROM registrations ORDER BY created_at DESC').all();
   res.json(rows.map(row => ({
     ...row,
+    code_letter: isPendingCode(row.code_letter) ? null : row.code_letter,
+    participant_id: isPendingCode(row.code_letter) ? null : row.participant_id,
+    code_assignment_pending: isPendingCode(row.code_letter),
     assigned_judge_ids: assignedJudgeIds(row.id),
     judge_panel_custom: !!db.prepare('SELECT 1 FROM registration_judge_panels WHERE registration_id = ?').get(row.id)
   })));
+});
+
+// Organizer assigns or changes a performance code after the student record exists.
+router.put('/:id/code-letter', requireOrganizerOrControlAdmin, (req, res) => {
+  const registration = db.prepare(`SELECT r.id, r.program_id, r.code_letter, r.participant_id,
+      p.code AS program_code, p.results_published
+    FROM registrations r JOIN programs p ON p.id = r.program_id WHERE r.id = ?`).get(req.params.id);
+  if (!registration) return res.status(404).json({ error: 'Registration not found' });
+  if (registration.results_published) return res.status(409).json({ error: 'Unpublish this program before assigning or changing a code letter' });
+  const codeLetter = String(req.body?.code_letter || '').trim().toUpperCase();
+  if (!CODE_LETTER_RE.test(codeLetter)) return res.status(400).json({ error: 'Choose a code letter from A to Z or AA to ZZ' });
+  if (registration.code_letter === codeLetter) return res.json({ ok: true, code_letter: codeLetter, participant_id: registration.participant_id });
+  const owner = db.prepare('SELECT id FROM registrations WHERE program_id = ? AND code_letter = ? AND id != ?')
+    .get(registration.program_id, codeLetter, registration.id);
+  if (owner) return res.status(409).json({ error: `Code letter ${codeLetter} is already assigned in this program` });
+
+  const currentNumber = registration.participant_id.match(/-(\d+)-[A-Z]{1,2}$/)?.[1];
+  let sequence = currentNumber ? Number(currentNumber) : 1;
+  if (!currentNumber) {
+    const usedNumbers = new Set(db.prepare('SELECT participant_id FROM registrations WHERE program_id = ?').all(registration.program_id)
+      .map(row => row.participant_id.match(/-(\d+)-[A-Z]{1,2}$/)?.[1]).filter(Boolean).map(Number));
+    while (usedNumbers.has(sequence)) sequence++;
+  }
+  let participantId = `FEST-${registration.program_code}-${String(sequence).padStart(3, '0')}-${codeLetter}`;
+  while (db.prepare('SELECT 1 FROM registrations WHERE participant_id = ? AND id != ?').get(participantId, registration.id)) {
+    participantId = `FEST-${registration.program_code}-${String(++sequence).padStart(3, '0')}-${codeLetter}`;
+  }
+  db.prepare('UPDATE registrations SET code_letter = ?, participant_id = ? WHERE id = ?')
+    .run(codeLetter, participantId, registration.id);
+  recordAudit(req, isPendingCode(registration.code_letter) ? 'assign_code_letter' : 'change_code_letter',
+    'registration', registration.id, { previous_code: isPendingCode(registration.code_letter) ? null : registration.code_letter,
+      code_letter: codeLetter, participant_id: participantId });
+  req.app.get('io').to(`program:${registration.program_id}`).emit('registration:new', {
+    id: registration.id, program_id: registration.program_id, code_letter: codeLetter,
+    participant_id: participantId, code_assigned: true
+  });
+  res.json({ ok: true, code_letter: codeLetter, participant_id: participantId });
 });
 
 router.get('/:id/judges', requireOrganizerOrControlAdmin, (req, res) => {
@@ -242,7 +262,7 @@ router.get('/judge-view', requireRole('judge'), (req, res) => {
   if (!isAssignedJudge(req.user.id, program_id)) return res.status(403).json({ error: 'You are not assigned to this program' });
   const rows = db.prepare(`
     SELECT id, program_id, code_letter, participant_id, is_team, status, created_at
-    FROM registrations WHERE program_id = ? ORDER BY length(code_letter), code_letter
+    FROM registrations WHERE program_id = ? AND code_letter NOT LIKE 'PENDING-%' ORDER BY length(code_letter), code_letter
   `).all(program_id).filter(row => assignedJudgeIds(row.id).some(id => Number(id) === Number(req.user.id)));
   res.json(rows);
 });
@@ -281,7 +301,7 @@ router.patch('/:id/status', requireOrganizerOrControlAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin: edit a registration's details (code letter / participant ID stay fixed)
+// Admin: edit a registration's student and team details.
 router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const cur = db.prepare('SELECT * FROM registrations WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Registration not found' });

@@ -21,6 +21,7 @@ router.post('/', requireRole('judge'), (req, res) => {
 
   const registration = db.prepare('SELECT * FROM registrations WHERE id = ?').get(registration_id);
   if (!registration) return res.status(404).json({ error: 'Registration not found' });
+  if (String(registration.code_letter).startsWith('PENDING-')) return res.status(409).json({ error: 'An organizer must assign a performance code before judging can begin' });
   if (Number(judge_id) !== req.user.id || !isAssignedJudge(req.user.id, registration.program_id)
     || !isAssignedJudgeToRegistration(req.user.id, registration.id)) {
     return res.status(403).json({ error: 'You are not assigned to score this participant' });

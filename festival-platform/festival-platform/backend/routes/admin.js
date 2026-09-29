@@ -28,12 +28,13 @@ router.get('/stats', (req, res) => {
   };
 
   const programs = db.prepare("SELECT * FROM programs ORDER BY CASE category WHEN 'premier' THEN 0 WHEN 'junior' THEN 1 ELSE 2 END, number, id").all().map(p => {
-    const registrations = db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(p.id);
+    const registrations = db.prepare('SELECT id, code_letter FROM registrations WHERE program_id = ?').all(p.id);
     const registered = registrations.length;
+    const codeAssigned = registrations.filter(row => !String(row.code_letter).startsWith('PENDING-'));
     const judges = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(p.id).c;
-    const scores = registrations.reduce((sum, row) => sum + activeScores(row.id).length, 0);
-    const scoresExpected = registrations.reduce((sum, row) => sum + assignedJudgeIds(row.id).length, 0);
-    const judged = registrations.filter(row => registrationIsFullyScored(row.id)).length;
+    const scores = codeAssigned.reduce((sum, row) => sum + activeScores(row.id).length, 0);
+    const scoresExpected = codeAssigned.reduce((sum, row) => sum + assignedJudgeIds(row.id).length, 0);
+    const judged = codeAssigned.filter(row => registrationIsFullyScored(row.id)).length;
     return {
       id: p.id, name: p.name, code: p.code, type: p.type, category: p.category, number: p.number, quota: p.quota, published: !!p.results_published,
       registered, spots_left: p.quota ? Math.max(p.quota - registered, 0) : null,
@@ -43,7 +44,7 @@ router.get('/stats', (req, res) => {
 
   const judges = db.prepare("SELECT id, code, name FROM users WHERE role = 'judge'").all().map(j => {
     const assigned = db.prepare('SELECT program_id FROM program_judges WHERE judge_id = ?').all(j.id);
-    const registrations = assigned.flatMap(a => db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(a.program_id));
+    const registrations = assigned.flatMap(a => db.prepare("SELECT id FROM registrations WHERE program_id = ? AND code_letter NOT LIKE 'PENDING-%'").all(a.program_id));
     const expected = registrations.filter(row => assignedJudgeIds(row.id).includes(j.id)).length;
     const submitted = registrations.reduce((sum, row) => sum + activeScores(row.id).filter(score => score.judge_id === j.id).length, 0);
     return { ...j, programs_assigned: assigned.length, scores_submitted: submitted, scores_expected: expected };
@@ -70,7 +71,9 @@ router.get('/registrations.csv', (req, res) => {
     FROM registrations r JOIN programs p ON p.id = r.program_id ORDER BY p.name, r.created_at`).all();
   const fields = ['participant_id','code_letter','student_name','student_id','team_name','program_id','program','is_team','team_members','language','source','status'];
   const quote = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  const csv = [fields.join(','), ...rows.map(row => fields.map(field => quote(row[field])).join(','))].join('\r\n');
+  const csv = [fields.join(','), ...rows.map(row => fields.map(field => quote(
+    String(row.code_letter).startsWith('PENDING-') && ['participant_id', 'code_letter'].includes(field) ? '' : row[field]
+  )).join(','))].join('\r\n');
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', 'attachment; filename="festival-registrations.csv"');
   res.send(`\uFEFF${csv}`);

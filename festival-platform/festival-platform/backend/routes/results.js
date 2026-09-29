@@ -36,8 +36,8 @@ function computeRankings(programId, withIdentity = false) {
     }
     return row;
   });
-  const judged = rows.filter(r => r.average_score !== null).sort((a, b) => b.average_score - a.average_score);
-  const unjudged = rows.filter(r => r.average_score === null);
+  const judged = rows.filter(r => r.average_score !== null && !String(r.code_letter || '').startsWith('PENDING-')).sort((a, b) => b.average_score - a.average_score);
+  const unjudged = rows.filter(r => r.average_score === null || String(r.code_letter || '').startsWith('PENDING-'));
   const manuallyPlaced = judged.filter(r => r.result_place !== null).sort((a, b) => a.result_place - b.result_place);
   if (manuallyPlaced.length) {
     const remaining = judged.filter(r => r.result_place === null);
@@ -122,8 +122,9 @@ router.post('/student-lookup', (req, res) => {
     }
 
     return {
-      participant_id: registration.participant_id,
-      code_letter: registration.code_letter,
+      participant_id: String(registration.code_letter).startsWith('PENDING-') ? null : registration.participant_id,
+      code_letter: String(registration.code_letter).startsWith('PENDING-') ? null : registration.code_letter,
+      code_assigned: !String(registration.code_letter).startsWith('PENDING-'),
       registration_status: registration.status,
       team_name: registration.team_name,
       program: {
@@ -157,7 +158,7 @@ router.get('/:programId/review', requireRole('organizer'), (req, res) => {
     FROM registrations r WHERE r.program_id = ? ORDER BY length(r.code_letter), r.code_letter, r.id`).all(program.id).map(participant => {
       const scores = activeScores(participant.registration_id);
       const average = scores.length ? scores.reduce((sum, score) => sum + score.score, 0) / scores.length : null;
-      return { ...participant, assigned_judge_ids: assignedJudgeIds(participant.registration_id),
+      return { ...participant, code_assigned: !String(participant.code_letter).startsWith('PENDING-'), assigned_judge_ids: assignedJudgeIds(participant.registration_id),
         judges_submitted: scores.length, average_score: average };
     });
   const scores = db.prepare(`SELECT s.id, s.registration_id, s.judge_id, u.name AS judge_name,
@@ -171,13 +172,19 @@ router.get('/:programId/review', requireRole('organizer'), (req, res) => {
     items.push(score);
     scoresByRegistration.set(score.registration_id, items);
   }
-  res.json({ program, judges, participants: participants.map(p => ({
-    ...p,
-    average_score: p.average_score == null ? null : Math.round(p.average_score * 100) / 100,
-    scores: (scoresByRegistration.get(p.registration_id) || []).map(score => ({
-      ...score, active: p.assigned_judge_ids.includes(Number(score.judge_id))
-    }))
-  })) });
+  res.json({ program, judges, participants: participants.map(p => {
+    const codeAssigned = !String(p.code_letter).startsWith('PENDING-');
+    return {
+      ...p,
+      participant_id: codeAssigned ? p.participant_id : null,
+      code_letter: codeAssigned ? p.code_letter : null,
+      code_assigned: codeAssigned,
+      average_score: p.average_score == null ? null : Math.round(p.average_score * 100) / 100,
+      scores: (scoresByRegistration.get(p.registration_id) || []).map(score => ({
+        ...score, active: p.assigned_judge_ids.includes(Number(score.judge_id))
+      }))
+    };
+  }) });
 });
 
 // Save the organizer's medal places for a program. Unselected participants are ranked by average score after 3rd place.
@@ -219,8 +226,9 @@ router.put('/:programId/placements', requireRole('organizer'), (req, res) => {
 
   for (const item of placements) {
     const registrationId = Number(item.registration_id);
-    const participant = db.prepare('SELECT id FROM registrations WHERE id = ? AND program_id = ?').get(registrationId, program.id);
+    const participant = db.prepare('SELECT id, code_letter FROM registrations WHERE id = ? AND program_id = ?').get(registrationId, program.id);
     if (!participant) return res.status(400).json({ error: 'A selected participant does not belong to this program' });
+    if (String(participant.code_letter).startsWith('PENDING-')) return res.status(409).json({ error: 'Assign this participant a performance code before giving them a place' });
     if (!assignedJudgeIds(registrationId).length || !activeScores(registrationId).length) {
       return res.status(409).json({ error: 'A participant needs at least one current assigned-judge score before receiving a draft place' });
     }

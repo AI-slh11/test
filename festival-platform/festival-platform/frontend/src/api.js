@@ -99,6 +99,7 @@ export const api = {
 
   register: (payload) => request('/registrations', { method: 'POST', body: JSON.stringify(payload) }),
   availableCodeLetters: (programId) => request(`/registrations/available-letters?program_id=${programId}`),
+  assignRegistrationCode: (id, codeLetter) => request(`/registrations/${id}/code-letter`, { method: 'PUT', body: JSON.stringify({ code_letter: codeLetter }) }),
   listRegistrations: (programId) => request(`/registrations${programId ? `?program_id=${programId}` : ''}`),
   setRegistrationJudges: (registrationId, judgeIds) => request(`/registrations/${registrationId}/judges`, { method: 'PUT', body: JSON.stringify({ judge_ids: judgeIds }) }),
   resetRegistrationJudges: (registrationId) => request(`/registrations/${registrationId}/judges`, { method: 'PUT', body: JSON.stringify({ inherit_program_panel: true }) }),
@@ -141,4 +142,3 @@ export const api = {
   downloadCertificatesZip,
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };
-

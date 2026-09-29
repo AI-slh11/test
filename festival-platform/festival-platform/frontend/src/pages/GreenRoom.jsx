@@ -10,10 +10,12 @@ export default function GreenRoom() {
   const [activeProgram, setActiveProgram] = useState('');
   const [registrations, setRegistrations] = useState([]);
   const [results, setResults] = useState(null);
-  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', code_letter: '', is_team: false, team_members: '', language: '', judge_ids: [] });
+  const [form, setForm] = useState({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [editing, setEditing] = useState(null);
+  const [editingCodeId, setEditingCodeId] = useState(null);
+  const [codeDraft, setCodeDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [downloadingCertificate, setDownloadingCertificate] = useState(null);
 
@@ -29,9 +31,7 @@ export default function GreenRoom() {
   useEffect(() => { loadRegistrations(activeProgram); }, [activeProgram]);
 
   const program = programs.find(p => String(p.id) === String(activeProgram));
-  const takenLetters = new Set(registrations.map(registration => registration.code_letter));
   const allCodeLetters = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))];
-  const availableLetters = allCodeLetters.filter(letter => !takenLetters.has(letter));
   const assignmentConflicts = program ? form.judge_ids.flatMap(judgeId => {
     const judge = judges.find(item => String(item.id) === String(judgeId));
     if (!judge || !program.time_slot?.trim()) return [];
@@ -51,13 +51,24 @@ export default function GreenRoom() {
     }
     try {
       await api.register({ ...form, program_id: activeProgram, source: 'onsite' });
-      setForm({ student_name: '', student_id: '', team_name: '', code_letter: '', is_team: false, team_members: '', language: '', judge_ids: [] });
+      setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
       loadRegistrations(activeProgram);
       loadPrograms();
       setNotice('Student registered.');
     } catch (err) {
       setError(err.message);
     }
+  };
+
+  const saveCodeLetter = async (registration) => {
+    setError(''); setNotice(''); setSaving(true);
+    try {
+      const assigned = await api.assignRegistrationCode(registration.id, codeDraft);
+      setEditingCodeId(null); setCodeDraft('');
+      await loadRegistrations(activeProgram); loadPrograms();
+      setNotice(`Code ${assigned.code_letter} assigned to ${registration.student_name}.`);
+    } catch (err) { setError(err.message); }
+    finally { setSaving(false); }
   };
 
   const saveRegistration = async (e) => {
@@ -75,7 +86,8 @@ export default function GreenRoom() {
   };
 
   const removeRegistration = async (registration) => {
-    if (!window.confirm(`Remove ${registration.student_name} (${registration.participant_id})? This permanently deletes the registration and its scorecards. Unpublish the program before removing a registration.`)) return;
+    const identity = registration.code_assignment_pending ? 'code not assigned yet' : registration.participant_id;
+    if (!window.confirm(`Remove ${registration.student_name} (${identity})? This permanently deletes the registration and its scorecards. Unpublish the program before removing a registration.`)) return;
     setError('');
     setNotice('');
     try {
@@ -148,12 +160,7 @@ export default function GreenRoom() {
                 <input value={form.student_name} onChange={e => setForm({ ...form, student_name: e.target.value })} required />
                 <label>Student ID</label>
                 <input value={form.student_id} onChange={e => setForm({ ...form, student_id: e.target.value })} required />
-                <label>Student’s chosen performance code</label>
-                <select value={form.code_letter} onChange={e => setForm({ ...form, code_letter: e.target.value })} required disabled={!availableLetters.length}>
-                  <option value="">{availableLetters.length ? 'Choose an available letter…' : 'No code letters available'}</option>
-                  {availableLetters.map(letter => <option key={letter} value={letter}>{letter}</option>)}
-                </select>
-                <p className="muted small">The student chooses this code. It determines performance order and cannot be shared within a program.</p>
+                <p className="muted small">Register the student first. Assign their performance code from the registrations list below.</p>
                 <label>Team</label>
                 <select value={form.team_name} onChange={e => setForm({ ...form, team_name: e.target.value })} required>
                   <option value="">Select team...</option>
@@ -206,13 +213,14 @@ export default function GreenRoom() {
 
           <div className="card">
             <h3>All Registrations for {programLabel(program)}</h3>
+            <p className="muted">Register students first, then assign or change each performance code here. Unassigned students are hidden from judges until a code is assigned.</p>
             {program.results_published && <p className="muted">Unpublish this program from Results before editing or removing registrations.</p>}
             <table>
               <thead><tr><th>Code</th><th>Name</th><th>Student ID</th><th>Team</th><th>Assigned judges</th><th>Source</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
                 {registrations.map(r => editing?.id === r.id ? (
                   <tr key={r.id}>
-                    <td>{r.code_letter}</td>
+                    <td>{r.code_assignment_pending ? 'Unassigned' : r.code_letter}</td>
                     <td><input aria-label="Student name" value={editing.values.student_name} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, student_name: e.target.value } }))} required /></td>
                     <td><input aria-label="Student ID" value={editing.values.student_id} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, student_id: e.target.value } }))} required /></td>
                     <td>
@@ -236,7 +244,19 @@ export default function GreenRoom() {
                   </tr>
                 ) : (
                   <tr key={r.id}>
-                    <td>{r.code_letter}</td>
+                    <td>
+                      {editingCodeId === r.id ? <div className="row-actions">
+                        <select aria-label={`Code letter for ${r.student_name}`} value={codeDraft} onChange={event => setCodeDraft(event.target.value)}>
+                          <option value="">Choose code…</option>
+                          {allCodeLetters.filter(letter => !registrations.some(other => other.id !== r.id && other.code_letter === letter)).map(letter => <option key={letter} value={letter}>{letter}</option>)}
+                        </select>
+                        <button disabled={saving || !codeDraft || program.results_published} onClick={() => saveCodeLetter(r)}>{saving ? 'Saving…' : 'Save code'}</button>
+                        <button className="secondary" disabled={saving} onClick={() => { setEditingCodeId(null); setCodeDraft(''); }}>Cancel</button>
+                      </div> : <div className="row-actions">
+                        <strong>{r.code_assignment_pending ? 'Unassigned' : r.code_letter}</strong>
+                        <button className="secondary" disabled={program.results_published} onClick={() => { setEditingCodeId(r.id); setCodeDraft(r.code_assignment_pending ? '' : r.code_letter); }}>{r.code_assignment_pending ? 'Assign code' : 'Change code'}</button>
+                      </div>}
+                    </td>
                     <td>{r.student_name}</td>
                     <td>{r.student_id}</td>
                     <td><TeamBadge name={r.team_name} /></td>
@@ -244,7 +264,7 @@ export default function GreenRoom() {
                       disabled={program.results_published} onSaved={() => loadRegistrations(activeProgram)} /></td>
                     <td>{r.source}</td>
                     <td>
-                      <select aria-label={`Status for ${r.participant_id}`} value={r.status} disabled={program.results_published}
+                      <select aria-label={`Status for ${r.student_name}`} value={r.status} disabled={program.results_published}
                         onChange={e => changeStatus(r.id, e.target.value)}>
                         {['registered', 'submission_received', 'slot_assigned', 'judged', 'results_announced'].map(status => <option key={status} value={status}>{status.replaceAll('_', ' ')}</option>)}
                       </select>
@@ -348,4 +368,3 @@ function RegistrationJudgeEditor({ registration, judges, disabled, onSaved }) {
     {disabled && <small className="muted">Unpublish results to edit the panel.</small>}
   </details>;
 }
-

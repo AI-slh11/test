@@ -210,6 +210,7 @@ export default function OrganizerResults({ programs }) {
           </div>
 
           {!judgeCount && <p className="error">Assign at least one judge to this program before placing or publishing results.</p>}
+          {participants.some(participant => !participant.code_assigned) && <p className="error">Assign a performance code to every registered student in Green Room before scoring, placing, or publishing.</p>}
           {ties.map(group => <p className="error" role="alert" key={group.map(row => row.registration_id).join('-')}>
             Tie alert: {group.map(row => row.participant_id).join(' and ')} both have {group[0].average_score}. Review the full scorecards, then assign distinct podium places using the organizer’s tie-break decision.
           </p>)}
@@ -277,7 +278,7 @@ export default function OrganizerResults({ programs }) {
                     return (
                       <tr key={participant.registration_id}>
                         <td>
-                          <strong>{participant.code_letter} · {participant.participant_id}</strong>
+                          <strong>{participant.code_assigned ? `${participant.code_letter} · ${participant.participant_id}` : 'Awaiting organizer code assignment'}</strong>
                           <small>{participant.student_name}{participant.is_team && participant.team_members ? ` · ${participant.team_members}` : ''}</small>
                         </td>
                         <td><TeamBadge name={participant.team_name} /></td>
@@ -306,9 +307,9 @@ export default function OrganizerResults({ programs }) {
                         <td>{participant.judges_submitted}/{judgeCount} {complete ? '✓' : ''}</td>
                         <td>
                           <select
-                            aria-label={`Place for ${participant.participant_id}`}
+                            aria-label={`Place for ${participant.participant_id || participant.student_name}`}
                             value={places[participant.registration_id] || ''}
-                            disabled={participant.judges_submitted === 0}
+                            disabled={!participant.code_assigned || participant.judges_submitted === 0}
                             onChange={e => setParticipantPlace(participant.registration_id, e.target.value)}
                           >
                             <option value="">Not placed</option>
@@ -347,4 +348,3 @@ export default function OrganizerResults({ programs }) {
     </section>
   );
 }
-

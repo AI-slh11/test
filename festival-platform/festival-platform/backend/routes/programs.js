@@ -161,6 +161,8 @@ router.patch('/:id/published', (req, res) => {
   if (!prog) return res.status(404).json({ error: 'Program not found' });
   const io = req.app.get('io');
   if (on) {
+    const pendingCodes = db.prepare("SELECT COUNT(*) c FROM registrations WHERE program_id = ? AND code_letter LIKE 'PENDING-%'").get(prog.id).c;
+    if (pendingCodes) return res.status(409).json({ error: `Assign a performance code to all ${pendingCodes} unassigned participant${pendingCodes === 1 ? '' : 's'} before publishing` });
     const assignedJudgeCount = db.prepare('SELECT COUNT(*) c FROM program_judges WHERE program_id = ?').get(prog.id).c;
     const registrations = db.prepare('SELECT id FROM registrations WHERE program_id = ?').all(prog.id);
     const fullyJudged = assignedJudgeCount > 0 && registrations.length > 0 && registrations.every(r => registrationIsFullyScored(r.id));
