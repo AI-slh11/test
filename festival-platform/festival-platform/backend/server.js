@@ -7,7 +7,10 @@ let sessionAuth;
 
 const app = express();
 const server = http.createServer(app);
-const frontendOrigins = (process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean);
+const frontendOrigins = [...new Set([
+  ...(process.env.FRONTEND_ORIGIN || '').split(',').map(s => s.trim()).filter(Boolean),
+  'https://rendezvous-mnz.vercel.app'
+])];
 const corsOrigin = frontendOrigins.length ? frontendOrigins : '*';
 const io = new Server(server, { cors: { origin: corsOrigin } });
 
