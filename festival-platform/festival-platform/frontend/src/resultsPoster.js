@@ -43,7 +43,7 @@ export async function downloadResultsPoster({ program, winners }) {
   if (!program || !winners?.length) throw new Error('Publish at least one podium place before generating a poster.');
   const [jmn, ndsu, rendezvous, footer] = await Promise.all([
     loadImage('/brand/jmn-logo.png'),
-    loadImage('/brand/ndsu-logo.jpeg'),
+    loadImage('/brand/ndsu-logo.png'),
     loadImage('/brand/logo-mark.png'),
     loadImage('/brand/footer-white.png')
   ]);
@@ -79,9 +79,9 @@ export async function downloadResultsPoster({ program, winners }) {
   const logoX = 636;
   logos.forEach((image, index) => {
     const x = logoX + index * 136;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.roundRect(x, 34, 118, 96, 12); ctx.fill();
-    drawContained(ctx, image, x + 8, 40, 102, 84);
+    // Keep the original transparent/white logo artwork on the poster itself;
+    // avoid opaque tiles that clash with the green poster background.
+    drawContained(ctx, image, x + 8, 36, 102, 92);
   });
 
   ctx.textAlign = 'left';
@@ -138,12 +138,10 @@ export async function downloadResultsPoster({ program, winners }) {
     }
   });
 
-  const footerY = HEIGHT - 106;
-  ctx.drawImage(footer, 48, footerY, WIDTH - 96, 82);
-  ctx.fillStyle = '#0b5734';
-  ctx.textAlign = 'center';
-  ctx.font = '700 20px Arial, sans-serif';
-  ctx.fillText('RENDEZVOUS ’26  ·  MARKAZUNNAJATH', WIDTH / 2, footerY + 48);
+  const footerWidth = 520;
+  const footerHeight = footerWidth * footer.naturalHeight / footer.naturalWidth;
+  const footerY = HEIGHT - footerHeight - 42;
+  ctx.drawImage(footer, (WIDTH - footerWidth) / 2, footerY, footerWidth, footerHeight);
 
   const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
   if (!blob) throw new Error('The poster image could not be created.');

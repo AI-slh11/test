@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const db = require('../db');
 const PDFDocument = require('pdfkit');
+const fs = require('fs');
+const path = require('path');
 
 const { TEAMS } = require('../teams');
 const { requireRole } = require('../sessionAuth');
@@ -247,7 +249,7 @@ router.get('/:programId', requireRole('organizer'), (req, res) => {
   res.json(computeRankings(req.params.programId));
 });
 
-// Certificate PDF for a placed participant (1st/2nd/3rd). Streams a simple generated PDF.
+// Certificate PDF for a placed participant (1st/2nd/3rd), with the festival's branded template.
 router.get('/:programId/certificate/:registrationId', requireRole('organizer'), (req, res) => {
   const { programId, registrationId } = req.params;
   const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
@@ -264,24 +266,57 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
 
   const doc = new PDFDocument({ layout: 'landscape', size: 'A4' });
   doc.pipe(res);
-  doc.rect(20, 20, doc.page.width - 40, doc.page.height - 40).stroke();
-  doc.fontSize(28).text('Certificate of Achievement', 0, 100, { align: 'center' });
-  doc.fontSize(16).text('Campus Festival', { align: 'center' });
-  doc.moveDown(2);
-  doc.fontSize(20).text(placeLabel, { align: 'center' });
-  doc.moveDown();
-  doc.fontSize(22).text(entry.student_name, { align: 'center' });
-  if (entry.is_team && entry.team_members) {
-    doc.moveDown(0.5);
-    doc.fontSize(12).text(`Team members: ${entry.team_members}`, { align: 'center' });
+  const { width, height } = doc.page;
+  const colors = { deep: '#073522', green: '#0b5734', lime: '#d9f36a', pale: '#e4f1df', muted: '#b8d3c0', white: '#ffffff' };
+  doc.rect(0, 0, width, height).fill(colors.deep);
+  doc.save().fillColor('#0b5734').circle(width - 25, 25, 160).fill().restore();
+  doc.save().fillColor('#086144').circle(30, height - 20, 125).fill().restore();
+  doc.lineWidth(2).strokeColor('#80aa55').rect(18, 18, width - 36, height - 36).stroke();
+  doc.lineWidth(0.8).strokeColor('#ffffff').opacity(0.22).rect(26, 26, width - 52, height - 52).stroke().opacity(1);
+
+  const brandDir = path.join(__dirname, '..', 'certificate-assets');
+  const logoFiles = ['jmn-logo.png', 'ndsu-logo.png', 'logo-mark.png'];
+  const logoBoxY = 38;
+  const logoBoxW = 72;
+  const logoBoxH = 58;
+  const gap = 14;
+  const totalLogoWidth = logoBoxW * logoFiles.length + gap * (logoFiles.length - 1);
+  let logoX = (width - totalLogoWidth) / 2;
+  for (const file of logoFiles) {
+    const imagePath = path.join(brandDir, file);
+    if (!fs.existsSync(imagePath)) { logoX += logoBoxW + gap; continue; }
+    doc.image(imagePath, logoX + 7, logoBoxY + 6, { fit: [logoBoxW - 14, logoBoxH - 12], align: 'center', valign: 'center' });
+    logoX += logoBoxW + gap;
   }
-  doc.moveDown();
-  doc.fontSize(14).text(`Program: ${program.name}${program.category ? ` (${program.category[0].toUpperCase() + program.category.slice(1)})` : ''}`, { align: 'center' });
-  doc.text(`Participant Code: ${entry.code_letter}`, { align: 'center' });
-  doc.text(`Participant ID: ${entry.participant_id}`, { align: 'center' });
+
+  doc.fillColor(colors.lime).font('Helvetica-Bold').fontSize(10)
+    .text("RENDEZVOUS '26 · MARKAZUNNAJATH FESTIVAL", 0, 111, { align: 'center', characterSpacing: 1.4 });
+  doc.fillColor(colors.white).font('Helvetica-Bold').fontSize(28)
+    .text('CERTIFICATE OF ACHIEVEMENT', 50, 145, { width: width - 100, align: 'center', characterSpacing: 1.1 });
+  doc.fillColor(colors.muted).font('Helvetica').fontSize(12)
+    .text('This certificate is proudly presented to', 0, 193, { align: 'center' });
+  doc.fillColor(colors.lime).font('Helvetica-Bold').fontSize(17)
+    .text(placeLabel.toUpperCase(), 0, 222, { align: 'center', characterSpacing: 1 });
+
+  doc.save().lineWidth(1.2).strokeColor('#91b85c').moveTo(125, 252).lineTo(width - 125, 252).stroke().restore();
+  doc.fillColor(colors.white).font('Helvetica-Bold').fontSize(29)
+    .text(entry.student_name, 55, 269, { width: width - 110, align: 'center', ellipsis: true });
+  if (entry.is_team && entry.team_members) {
+    doc.fillColor(colors.pale).font('Helvetica').fontSize(10)
+      .text(`Team members: ${entry.team_members}`, 65, 308, { width: width - 130, align: 'center', ellipsis: true });
+  }
+  const programLine = `Program: ${program.name}${program.category ? ` (${program.category[0].toUpperCase() + program.category.slice(1)})` : ''}`;
+  doc.fillColor(colors.pale).font('Helvetica').fontSize(12)
+    .text(programLine, 45, entry.is_team && entry.team_members ? 329 : 318, { width: width - 90, align: 'center', ellipsis: true });
+  doc.fillColor(colors.muted).font('Helvetica').fontSize(9)
+    .text(`Participant code: ${entry.code_letter}   ·   ID: ${entry.participant_id}`, 0, 350, { align: 'center' });
+
+  const footerPath = path.join(brandDir, 'footer-white.png');
+  if (fs.existsSync(footerPath)) {
+    const footerWidth = 300;
+    doc.image(footerPath, (width - footerWidth) / 2, height - 53, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
+  }
   doc.end();
 });
 
 module.exports = router;
-
-
