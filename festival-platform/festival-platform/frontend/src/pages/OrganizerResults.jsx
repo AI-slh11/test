@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
-import { downloadResultsPoster } from '../resultsPoster.js';
+import { downloadResultsPoster, POSTER_FONTS, POSTER_TEMPLATES } from '../resultsPoster.js';
 
 const placeNames = { 1: '1st', 2: '2nd', 3: '3rd' };
 
@@ -20,6 +20,8 @@ export default function OrganizerResults({ programs }) {
   const [downloadingCertificate, setDownloadingCertificate] = useState(null);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const [downloadingPoster, setDownloadingPoster] = useState(false);
+  const [posterTemplate, setPosterTemplate] = useState('emerald');
+  const [posterFont, setPosterFont] = useState('poppins');
 
   const loadReview = async (id = programId) => {
     if (!id) { setReview(null); setTeamPoints({ 1: '', 2: '', 3: '' }); return; }
@@ -155,7 +157,7 @@ export default function OrganizerResults({ programs }) {
     try {
       const winners = participants.filter(row => row.result_place != null)
         .map(row => ({ ...row, rank: Number(row.result_place) }));
-      await downloadResultsPoster({ program: review.program, winners });
+      await downloadResultsPoster({ program: review.program, winners, template: posterTemplate, font: posterFont });
       setMessage('Published results poster downloaded.');
     } catch (e) { setError(e.message || 'Could not generate the results poster.'); }
     finally { setDownloadingPoster(false); }
@@ -255,6 +257,18 @@ export default function OrganizerResults({ programs }) {
               </div>
               <button disabled={downloadingAll || downloadingCertificate != null || ![1,2,3].some(place => participants.some(row => Number(row.result_place) === place))}
                 onClick={generateAllCertificates}>{downloadingAll ? 'Preparing certificates…' : 'Download all winner certificates (ZIP)'}</button>
+              <div className="grid-2" style={{ marginTop: 18 }}>
+                <label>Poster template
+                  <select value={posterTemplate} onChange={event => setPosterTemplate(event.target.value)}>
+                    {POSTER_TEMPLATES.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+                  </select>
+                </label>
+                <label>Poster font
+                  <select value={posterFont} onChange={event => setPosterFont(event.target.value)}>
+                    {POSTER_FONTS.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}
+                  </select>
+                </label>
+              </div>
               <button className="secondary" disabled={downloadingPoster || ![1,2,3].some(place => participants.some(row => Number(row.result_place) === place))}
                 onClick={generatePoster}>{downloadingPoster ? 'Generating poster…' : 'Download published results poster (PNG)'}</button>
             </div>

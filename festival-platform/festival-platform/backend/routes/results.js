@@ -286,7 +286,7 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
   const logoBoxY = 38;
   const logoBoxW = 72;
   const logoBoxH = 58;
-  const gap = 14;
+  const gap = 7;
   const totalLogoWidth = logoBoxW * logoFiles.length + gap * (logoFiles.length - 1);
   let logoX = (width - totalLogoWidth) / 2;
   for (const file of logoFiles) {
@@ -321,7 +321,7 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
   const footerPath = path.join(brandDir, 'footer-white.png');
   if (fs.existsSync(footerPath)) {
     const footerWidth = 300;
-    doc.image(footerPath, (width - footerWidth) / 2, height - 76, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
+    doc.image(footerPath, (width - footerWidth) / 2, height - 98, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
   }
   doc.end();
 });
