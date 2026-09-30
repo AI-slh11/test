@@ -18,7 +18,13 @@ export const POSTER_FONTS = [
   { id: 'poppins', name: 'Poppins', family: 'Poppins, Arial, sans-serif' },
   { id: 'inter', name: 'Inter', family: 'Inter, Arial, sans-serif' },
   { id: 'anton', name: 'Anton', family: 'Anton, Impact, sans-serif' },
-  { id: 'georgia', name: 'Georgia', family: 'Georgia, serif' }
+  { id: 'georgia', name: 'Georgia', family: 'Georgia, serif' },
+  { id: 'system', name: 'Modern Sans', family: 'Arial, Helvetica, sans-serif' },
+  { id: 'trebuchet', name: 'Trebuchet', family: 'Trebuchet MS, sans-serif' },
+  { id: 'palatino', name: 'Palatino', family: 'Palatino Linotype, Book Antiqua, serif' },
+  { id: 'times', name: 'Classic Serif', family: 'Times New Roman, serif' },
+  { id: 'impact', name: 'Impact', family: 'Impact, Haettenschweiler, sans-serif' },
+  { id: 'courier', name: 'Typewriter', family: 'Courier New, monospace' }
 ];
 
 const THEMES = {
