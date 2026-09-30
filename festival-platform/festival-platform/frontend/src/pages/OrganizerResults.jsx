@@ -57,8 +57,7 @@ export default function OrganizerResults({ programs }) {
   const allJudged = participants.length > 0 && participants.every(participantComplete);
   const requiredPlaces = Math.min(3, participants.length);
   const placeValues = Object.values(places).filter(Boolean);
-  const podiumComplete = requiredPlaces > 0
-    && Array.from({ length: requiredPlaces }, (_, index) => String(index + 1)).every(place => placeValues.includes(place));
+  const podiumComplete = requiredPlaces > 0 && placeValues.length >= requiredPlaces && placeValues.includes('1');
 
   const savedPlaces = useMemo(() => (review?.participants || [])
     .filter(row => row.result_place != null)
@@ -75,9 +74,6 @@ export default function OrganizerResults({ programs }) {
     setPlaces(current => {
       const next = { ...current, [registrationId]: nextPlace };
       if (!nextPlace) delete next[registrationId];
-      else Object.keys(next).forEach(id => {
-        if (id !== String(registrationId) && next[id] === nextPlace) delete next[id];
-      });
       return next;
     });
     setMessage('');
@@ -146,8 +142,8 @@ export default function OrganizerResults({ programs }) {
   };
 
   const generateAllCertificates = async () => {
-    const winners = [1, 2, 3].map(place => participants.find(row => Number(row.result_place) === place))
-      .filter(Boolean).map(row => ({ ...row, place: `${row.result_place}-place` }));
+    const winners = participants.filter(row => row.result_place != null)
+      .map(row => ({ ...row, place: `${row.result_place}-place` }));
     setDownloadingAll(true); setError('');
     try { await api.downloadCertificatesZip(programId, winners); setMessage(`Downloaded ${winners.length} winner certificates in one ZIP file.`); }
     catch (e) { setError(e.message || 'Could not generate certificates.'); }
@@ -157,8 +153,8 @@ export default function OrganizerResults({ programs }) {
   const generatePoster = async () => {
     setDownloadingPoster(true); setError('');
     try {
-      const winners = [1, 2, 3].map(place => participants.find(row => Number(row.result_place) === place))
-        .filter(Boolean).map(row => ({ ...row, rank: Number(row.result_place) }));
+      const winners = participants.filter(row => row.result_place != null)
+        .map(row => ({ ...row, rank: Number(row.result_place) }));
       await downloadResultsPoster({ program: review.program, winners });
       setMessage('Published results poster downloaded.');
     } catch (e) { setError(e.message || 'Could not generate the results poster.'); }
@@ -173,7 +169,7 @@ export default function OrganizerResults({ programs }) {
     <section className="organizer-results">
       <div className="card">
         <h3>Judge results and podium</h3>
-        <p className="muted">Review each judge’s score and remarks. Assign 1st, 2nd and 3rd place, then publish the approved results to the public leaderboard.</p>
+        <p className="muted">Review each judge’s score and remarks. Assign 1st, 2nd and 3rd place; multiple students may share a place.</p>
         <label htmlFor="results-program">Program</label>
         <select id="results-program" value={programId} onChange={e => setProgramId(e.target.value)}>
           <option value="">Select a program...</option>
@@ -212,13 +208,13 @@ export default function OrganizerResults({ programs }) {
           {!judgeCount && <p className="error">Assign at least one judge to this program before placing or publishing results.</p>}
           {participants.some(participant => !participant.code_assigned) && <p className="error">Assign a performance code to every registered student in Green Room before scoring, placing, or publishing.</p>}
           {ties.map(group => <p className="error" role="alert" key={group.map(row => row.registration_id).join('-')}>
-            Tie alert: {group.map(row => row.participant_id).join(' and ')} both have {group[0].average_score}. Review the full scorecards, then assign distinct podium places using the organizer’s tie-break decision.
+            Tie alert: {group.map(row => row.participant_id).join(' and ')} have the same average ({group[0].average_score}). You may assign them the same place or use your tie-break decision.
           </p>)}
           {participants.length > 0 && !allJudged && judgeCount > 0 && (
             <p className="muted">You can save draft places as scorecards arrive. Publishing unlocks after every assigned judge has scored every participant.</p>
           )}
           {!review.program.results_published && !podiumComplete && participants.length > 0 && (
-            <p className="muted">Assign the first {requiredPlaces} place{requiredPlaces === 1 ? '' : 's'} before publishing.</p>
+            <p className="muted">Assign podium places to at least {requiredPlaces} participant{requiredPlaces === 1 ? '' : 's'}, including at least one 1st-place winner. Multiple participants may share a place.</p>
           )}
 
           <div className="card">
@@ -242,19 +238,17 @@ export default function OrganizerResults({ programs }) {
               <p className="muted">Generate a personalized PDF certificate for each published podium winner.</p>
               <div className="grid-2">
                 {[1, 2, 3].map(place => {
-                  const winner = participants.find(row => Number(row.result_place) === place);
+                  const winners = participants.filter(row => Number(row.result_place) === place);
                   return (
                     <div className="card" key={place}>
                       <h4>{placeNames[place]} place</h4>
-                      {winner ? (
-                        <>
-                          <p><strong>{winner.student_name}</strong></p>
-                          <p className="muted">{winner.participant_id} · {programLabel(review.program)}</p>
-                          <button disabled={downloadingCertificate != null} onClick={() => generateCertificate(winner)}>
-                            {downloadingCertificate === winner.registration_id ? 'Generating…' : `Generate ${placeNames[place]} certificate`}
-                          </button>
-                        </>
-                      ) : <p className="muted">No winner assigned to this place.</p>}
+                      {winners.length ? winners.map(winner => <div className="winner-certificate" key={winner.registration_id}>
+                        <p><strong>{winner.student_name}</strong></p>
+                        <p className="muted">{winner.participant_id} · {programLabel(review.program)}</p>
+                        <button disabled={downloadingCertificate != null} onClick={() => generateCertificate(winner)}>
+                          {downloadingCertificate === winner.registration_id ? 'Generating…' : `Generate for ${winner.student_name}`}
+                        </button>
+                      </div>) : <p className="muted">No winners assigned to this place.</p>}
                     </div>
                   );
                 })}

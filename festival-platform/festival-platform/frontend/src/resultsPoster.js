@@ -48,6 +48,18 @@ export async function downloadResultsPoster({ program, winners }) {
     loadImage('/brand/footer-white.png')
   ]);
 
+  const podiumGroups = [1, 2, 3].map(rank => ({
+    rank,
+    winners: winners.filter(winner => Number(winner.rank) === rank)
+  })).filter(group => group.winners.length);
+  const startY = 476;
+  const cardGap = 22;
+  const cardHeights = podiumGroups.map(group => 202 + (group.winners.length - 1) * 90);
+  const footerWidth = 520;
+  const footerHeight = footerWidth * footer.naturalHeight / footer.naturalWidth;
+  const cardsHeight = cardHeights.reduce((sum, height) => sum + height, 0) + Math.max(0, podiumGroups.length - 1) * cardGap;
+  const HEIGHT = Math.max(1350, startY + cardsHeight + 30 + footerHeight + 42);
+
   const canvas = document.createElement('canvas');
   canvas.width = WIDTH;
   canvas.height = HEIGHT;
@@ -99,41 +111,54 @@ export async function downloadResultsPoster({ program, winners }) {
   ctx.font = '500 18px Arial, sans-serif';
   ctx.fillText('OFFICIAL FESTIVAL PLACEMENTS', 70, 435);
 
-  const sorted = [...winners].sort((a, b) => a.rank - b.rank);
   const accents = { 1: '#e2fa04', 2: '#dce5e8', 3: '#e7a65c' };
   const medals = { 1: '1ST PLACE', 2: '2ND PLACE', 3: '3RD PLACE' };
-  const startY = 476;
-  sorted.forEach((winner, index) => {
-    const y = startY + index * 224;
-    const accent = accents[winner.rank] || '#e2fa04';
+  let y = startY;
+  podiumGroups.forEach((group, index) => {
+    const cardHeight = cardHeights[index];
+    const accent = accents[group.rank] || '#e2fa04';
     ctx.fillStyle = 'rgba(255,255,255,.075)';
-    ctx.beginPath(); ctx.roundRect(62, y, 956, 202, 22); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(62, y, 956, cardHeight, 22); ctx.fill();
     ctx.strokeStyle = `${accent}99`;
     ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.roundRect(62, y, 956, 202, 22); ctx.stroke();
+    ctx.beginPath(); ctx.roundRect(62, y, 956, cardHeight, 22); ctx.stroke();
     ctx.fillStyle = accent;
     ctx.beginPath(); ctx.roundRect(86, y + 34, 168, 48, 24); ctx.fill();
     ctx.fillStyle = '#102319';
     ctx.font = '800 18px Arial, sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText(medals[winner.rank] || `${winner.rank} PLACE`, 170, y + 65);
+    ctx.fillText(medals[group.rank] || `${group.rank} PLACE`, 170, y + 65);
 
-    ctx.textAlign = 'left';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '700 36px Arial, sans-serif';
-    const nameLines = wrappedText(ctx, winner.student_name || `Participant ${winner.code_letter || ''}`, 286, y + 70, 680, 42, 2);
-    let detailY = y + 102 + (nameLines - 1) * 42;
-    ctx.fillStyle = '#b9d9c5';
-    ctx.font = '600 20px Arial, sans-serif';
-    ctx.fillText(winner.team_name || '', 288, detailY);
-    if (winner.is_team && winner.team_members) {
-      ctx.font = '400 16px Arial, sans-serif';
-      wrappedText(ctx, `With ${winner.team_members}`, 288, detailY + 29, 680, 22, 2);
-    }
+    const rowHeight = cardHeight / group.winners.length;
+    group.winners.forEach((winner, winnerIndex) => {
+      ctx.textAlign = 'left';
+      ctx.fillStyle = '#ffffff';
+      if (group.winners.length === 1) {
+        ctx.font = '700 36px Arial, sans-serif';
+        const nameLines = wrappedText(ctx, winner.student_name || `Participant ${winner.code_letter || ''}`, 286, y + 70, 680, 42, 2);
+        const detailY = y + 102 + (nameLines - 1) * 42;
+        ctx.fillStyle = '#b9d9c5';
+        ctx.font = '600 20px Arial, sans-serif';
+        ctx.fillText(winner.team_name || '', 288, detailY);
+        if (winner.is_team && winner.team_members) {
+          ctx.font = '400 16px Arial, sans-serif';
+          wrappedText(ctx, `With ${winner.team_members}`, 288, detailY + 29, 680, 22, 2);
+        }
+        return;
+      }
+
+      const rowTop = y + winnerIndex * rowHeight;
+      const nameSize = Math.max(17, Math.min(30, rowHeight * 0.24));
+      const nameY = rowTop + Math.max(nameSize + 10, rowHeight * 0.53);
+      ctx.font = `700 ${nameSize}px Arial, sans-serif`;
+      wrappedText(ctx, winner.student_name || `Participant ${winner.code_letter || ''}`, 286, nameY, 680, nameSize + 5, 1);
+      ctx.fillStyle = '#b9d9c5';
+      ctx.font = `600 ${Math.max(13, Math.min(18, nameSize * 0.56))}px Arial, sans-serif`;
+      ctx.fillText(`${winner.team_name || ''}${winner.is_team && winner.team_members ? ` · ${winner.team_members}` : ''}`, 288, nameY + Math.max(20, nameSize * 0.78));
+    });
+    y += cardHeight + cardGap;
   });
 
-  const footerWidth = 520;
-  const footerHeight = footerWidth * footer.naturalHeight / footer.naturalWidth;
   const footerY = HEIGHT - footerHeight - 42;
   ctx.drawImage(footer, (WIDTH - footerWidth) / 2, footerY, footerWidth, footerHeight);
 

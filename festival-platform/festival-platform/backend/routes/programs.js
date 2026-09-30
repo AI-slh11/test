@@ -170,10 +170,12 @@ router.patch('/:id/published', (req, res) => {
       return res.status(409).json({ error: 'All participants must be fully judged before results can be published' });
     }
     const requiredPlaces = Math.min(3, registrations.length);
-    const assignedPlaces = new Set(db.prepare('SELECT result_place FROM registrations WHERE program_id = ? AND result_place IS NOT NULL').all(prog.id).map(row => row.result_place));
-    const completePodium = requiredPlaces > 0 && Array.from({ length: requiredPlaces }, (_, index) => index + 1).every(place => assignedPlaces.has(place));
+    const podium = db.prepare(`SELECT COUNT(*) AS placed_count,
+        MAX(CASE WHEN result_place = 1 THEN 1 ELSE 0 END) AS has_first
+      FROM registrations WHERE program_id = ? AND result_place IS NOT NULL`).get(prog.id);
+    const completePodium = requiredPlaces > 0 && podium.placed_count >= requiredPlaces && podium.has_first === 1;
     if (!completePodium) {
-      return res.status(409).json({ error: `Assign 1st, 2nd and 3rd places before publishing (${requiredPlaces} place${requiredPlaces === 1 ? '' : 's'} required)` });
+      return res.status(409).json({ error: `Assign podium places to at least ${requiredPlaces} participant${requiredPlaces === 1 ? '' : 's'}, including at least one 1st-place winner. Multiple participants may share a place.` });
     }
     if (!prog.results_published) {
       db.prepare("UPDATE programs SET results_published = 1, published_at = datetime('now') WHERE id = ?").run(prog.id);

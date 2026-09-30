@@ -208,20 +208,19 @@ router.put('/:programId/placements', requireRole('organizer'), (req, res) => {
       } else teamPoints[place] = Number(value);
     }
   }
-  if (!Array.isArray(placements) || placements.length > 3) {
-    return res.status(400).json({ error: 'placements must be an array with at most three entries' });
+  const registrationCount = db.prepare('SELECT COUNT(*) AS count FROM registrations WHERE program_id = ?').get(program.id).count;
+  if (!Array.isArray(placements) || placements.length > registrationCount) {
+    return res.status(400).json({ error: 'placements must be a list of participants in this program' });
   }
   const registrationIds = new Set();
-  const places = new Set();
   for (const item of placements) {
     const registrationId = Number(item?.registration_id);
     const place = Number(item?.place);
     if (!Number.isInteger(registrationId) || registrationId < 1 || ![1, 2, 3].includes(place)
-      || registrationIds.has(registrationId) || places.has(place)) {
-      return res.status(400).json({ error: 'Each participant and place (1st, 2nd, 3rd) can only be selected once' });
+      || registrationIds.has(registrationId)) {
+      return res.status(400).json({ error: 'Each participant can only be selected once, with a place from 1st to 3rd' });
     }
     registrationIds.add(registrationId);
-    places.add(place);
   }
 
   for (const item of placements) {

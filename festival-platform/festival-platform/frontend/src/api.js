@@ -49,7 +49,8 @@ async function downloadCertificatesZip(programId, winners) {
       try { data = await response.json(); } catch {}
       throw new Error(data.error || `Could not generate ${winner.place} place certificate`);
     }
-    zip.file(`${winner.place}-${String(winner.student_name || winner.participant_id).replace(/[^a-z0-9-_ ]/gi, '').trim() || winner.participant_id}.pdf`, await response.blob());
+    const safeName = String(winner.student_name || 'participant').replace(/[^a-z0-9-_ ]/gi, '').trim() || 'participant';
+    zip.file(`${winner.place}-${winner.participant_id}-${safeName}.pdf`, await response.blob());
   }
   const blob = await zip.generateAsync({ type: 'blob' });
   const url = URL.createObjectURL(blob);

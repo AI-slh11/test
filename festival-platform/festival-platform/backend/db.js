@@ -106,7 +106,7 @@ if (!hasCol('registrations', 'team_roster')) db.exec('ALTER TABLE registrations 
 if (!hasCol('registrations', 'result_place')) {
   db.exec('ALTER TABLE registrations ADD COLUMN result_place INTEGER CHECK (result_place IS NULL OR result_place BETWEEN 1 AND 3)');
 }
-db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_program_result_place ON registrations(program_id, result_place) WHERE result_place IS NOT NULL');
+db.exec('DROP INDEX IF EXISTS idx_reg_program_result_place');
 db.exec('DROP INDEX IF EXISTS idx_reg_program_code_letter');
 db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_reg_program_assigned_code_letter ON registrations(program_id, code_letter) WHERE code_letter NOT LIKE 'PENDING-%'");
 if (!hasCol('programs', 'results_published')) db.exec('ALTER TABLE programs ADD COLUMN results_published INTEGER NOT NULL DEFAULT 0');
