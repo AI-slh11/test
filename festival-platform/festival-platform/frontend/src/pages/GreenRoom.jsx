@@ -257,8 +257,18 @@ export default function GreenRoom() {
                         <button className="secondary" disabled={program.results_published} onClick={() => { setEditingCodeId(r.id); setCodeDraft(r.code_assignment_pending ? '' : r.code_letter); }}>{r.code_assignment_pending ? 'Assign code' : 'Change code'}</button>
                       </div>}
                     </td>
-                    <td>{r.student_name}</td>
-                    <td>{r.student_id}</td>
+                    <td>
+                      {r.student_name}
+                      {r.team_roster?.length > 0 ? <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                        {r.team_roster.map(member => <li key={member.student_id}>{member.student_name}</li>)}
+                      </ul> : r.is_team && r.team_members ? <div className="muted small">{r.team_members}</div> : null}
+                    </td>
+                    <td>
+                      {r.student_id}
+                      {r.team_roster?.length > 0 && <ul className="small" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                        {r.team_roster.map(member => <li key={member.student_id}>{member.student_id}</li>)}
+                      </ul>}
+                    </td>
                     <td><TeamBadge name={r.team_name} /></td>
                     <td><RegistrationJudgeEditor registration={r} judges={program?.judges || []}
                       disabled={program.results_published} onSaved={() => loadRegistrations(activeProgram)} /></td>

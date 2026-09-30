@@ -26,10 +26,20 @@ router.get('/available-letters', (req, res) => {
   res.json({ taken, available: CODE_LETTER_OPTIONS.filter(letter => !taken.includes(letter)) });
 });
 
+// Resolve a group member by their Student ID for the public registration form.
+router.get('/lookup-student/:studentId', (req, res) => {
+  const studentId = String(req.params.studentId || '').trim().toUpperCase();
+  if (!STUDENT_ID_RE.test(studentId)) return res.status(400).json({ error: 'Enter a valid Student ID first' });
+  const student = db.prepare(`SELECT student_name, student_id, team_name FROM registrations
+    WHERE student_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`).get(studentId);
+  if (!student) return res.status(404).json({ error: 'Student not found. Enter their full name and Student ID.' });
+  res.json(student);
+});
+
 // Register a student for a program. Works identically for organizer on-site (Green Room)
 // registration and public online self-registration; `source` distinguishes them.
 router.post('/', optionalAuth, (req, res) => {
-  const { program_id, student_name, student_id, is_team, team_members, language, source, team_name, team_leader_name, team_leader_id } = req.body;
+  const { program_id, student_name, student_id, is_team, team_members, team_roster: rawTeamRoster, language, source, team_name, team_leader_name, team_leader_id } = req.body;
   if (req.body?.team_leader_registration && req.user?.role !== 'organizer' && !req.admin) {
     return res.status(403).json({ error: 'Team leader roster registration must be submitted by an organizer' });
   }
@@ -54,6 +64,24 @@ router.post('/', optionalAuth, (req, res) => {
   if (!STUDENT_ID_RE.test(studentId)) {
     return res.status(400).json({ error: 'Invalid Student ID. Format: 4 digits, 2-3 letters, 3 digits (e.g. 2023CSE001)' });
   }
+  let teamRoster = [];
+  if (is_team) {
+    if (rawTeamRoster !== undefined && !Array.isArray(rawTeamRoster)) return res.status(400).json({ error: 'Group members must be a list of students' });
+    const submittedRoster = Array.isArray(rawTeamRoster) ? rawTeamRoster : [];
+    if (submittedRoster.length > 24) return res.status(400).json({ error: 'A group can include up to 25 students including the registrant' });
+    const seenIds = new Set([studentId]);
+    for (const member of submittedRoster) {
+      const memberId = String(member?.student_id || '').trim().toUpperCase();
+      if (!STUDENT_ID_RE.test(memberId)) return res.status(400).json({ error: 'Enter a valid Student ID for every group member' });
+      if (seenIds.has(memberId)) return res.status(409).json({ error: `Student ID ${memberId} is listed more than once in this group` });
+      seenIds.add(memberId);
+      const existingStudent = db.prepare(`SELECT student_name, student_id FROM registrations
+        WHERE student_id = ? ORDER BY created_at DESC, id DESC LIMIT 1`).get(memberId);
+      const memberName = existingStudent?.student_name || String(member?.student_name || '').trim();
+      if (!memberName) return res.status(400).json({ error: `Student ${memberId} is not registered yet. Enter their full name and Student ID.` });
+      teamRoster.push({ student_name: memberName, student_id: memberId, found: !!existingStudent });
+    }
+  }
   const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(program_id);
   if (!program) return res.status(404).json({ error: 'Program not found' });
   if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before registering students or changing its panel' });
@@ -75,13 +103,14 @@ router.post('/', optionalAuth, (req, res) => {
 
   const register = db.transaction(() => {
     const info = db.prepare(`
-    INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name, team_leader_name, team_leader_id)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name, team_leader_name, team_leader_id, team_roster)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      program_id, student_name.trim(), studentId, is_team ? 1 : 0, team_members || null,
+      program_id, student_name.trim(), studentId, is_team ? 1 : 0, teamRoster.length ? teamRoster.map(member => member.student_name).join(', ') : (team_members || null),
       language || program.language || null, pendingCode, pendingParticipantId, source === 'onsite' ? 'onsite' : 'online', team_name,
       team_leader_name ? String(team_leader_name).trim().slice(0, 120) : null,
-      team_leader_id ? String(team_leader_id).trim().toUpperCase().slice(0, 12) : null
+      team_leader_id ? String(team_leader_id).trim().toUpperCase().slice(0, 12) : null,
+      teamRoster.length ? JSON.stringify(teamRoster) : null
     );
     const currentProgramJudges = db.prepare('SELECT judge_id FROM program_judges WHERE program_id = ?').all(program_id).map(row => row.judge_id);
     const addedProgramJudges = judgeIds.filter(judgeId => !currentProgramJudges.includes(judgeId));
@@ -121,6 +150,7 @@ router.post('/', optionalAuth, (req, res) => {
     id: registration.id, program_id: registration.program_id, student_name: registration.student_name,
     team_name: registration.team_name, code_letter: null, participant_id: null,
     ...(organizer ? { student_id: registration.student_id, source: registration.source } : {}),
+    ...(teamRoster.length ? { team_roster: teamRoster } : {}),
     code_assignment_pending: true
   } });
 });
@@ -163,6 +193,7 @@ router.get('/', requireOrganizerOrControlAdmin, (req, res) => {
     : db.prepare('SELECT * FROM registrations ORDER BY created_at DESC').all();
   res.json(rows.map(row => ({
     ...row,
+    team_roster: (() => { try { return row.team_roster ? JSON.parse(row.team_roster) : []; } catch { return []; } })(),
     code_letter: isPendingCode(row.code_letter) ? null : row.code_letter,
     participant_id: isPendingCode(row.code_letter) ? null : row.participant_id,
     code_assignment_pending: isPendingCode(row.code_letter),

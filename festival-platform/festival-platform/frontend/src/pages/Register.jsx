@@ -18,6 +18,7 @@ export default function Register() {
   const [roster, setRoster] = useState([{ student_name: '', student_id: '' }]);
   const [batchResult, setBatchResult] = useState(null);
   const [batchErrors, setBatchErrors] = useState([]);
+  const [groupMembers, setGroupMembers] = useState([]);
 
   useEffect(() => {
     api.listPrograms().then(p => { setPrograms(p); setLoadState('ok'); }).catch(() => setLoadState('failed'));
@@ -25,6 +26,18 @@ export default function Register() {
 
   const categoryPrograms = programs.filter(p => category === 'general' ? !p.category : p.category === category);
   const selectedProgram = programs.find(p => String(p.id) === String(form.program_id));
+  const updateGroupMember = (index, changes) => setGroupMembers(current => current.map((member, i) => i === index ? { ...member, ...changes } : member));
+  const lookupGroupMember = async (index) => {
+    const studentId = String(groupMembers[index]?.student_id || '').trim().toUpperCase();
+    if (!/^\d{4}[A-Z]{2,3}\d{3}$/.test(studentId)) return;
+    updateGroupMember(index, { student_id: studentId, lookup: 'loading' });
+    try {
+      const student = await api.lookupStudent(studentId);
+      updateGroupMember(index, { student_id: student.student_id, student_name: student.student_name, team_name: student.team_name, lookup: 'found' });
+    } catch (err) {
+      updateGroupMember(index, { lookup: 'missing', ...(err.message.includes('Student not found') ? {} : { lookup_error: err.message }) });
+    }
+  };
   const submit = async (e) => {
     e.preventDefault();
     setError(''); setResult(null); setBatchResult(null); setBatchErrors([]);
@@ -48,7 +61,13 @@ export default function Register() {
         setRoster(failedEntries.length ? failedEntries : [{ student_name: '', student_id: '' }]);
         return;
       }
-      const { registration } = await api.register({ ...form, language: form.language || selectedProgram?.language || '', source: 'online' });
+      const additionalMembers = form.is_team ? groupMembers : [];
+      if (form.is_team && additionalMembers.length < 1) throw new Error('Add at least one other group member and enter their Student ID.');
+      const memberIds = additionalMembers.map(member => String(member.student_id || '').trim().toUpperCase());
+      if (memberIds.includes(String(form.student_id).trim().toUpperCase()) || new Set(memberIds).size !== memberIds.length) {
+        throw new Error('Each student must have a different Student ID.');
+      }
+      const { registration } = await api.register({ ...form, team_roster: additionalMembers.map(({ student_id, student_name }) => ({ student_id, student_name })), language: form.language || selectedProgram?.language || '', source: 'online' });
       setResult(registration);
       setForm({ program_id: '', student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
     } catch (err) {
@@ -132,13 +151,27 @@ export default function Register() {
         <p className="muted small">Format: 4 digits, 2–3 letters, 3 digits. You're registered instantly — no approval needed.</p>
 
         <label className="checkbox">
-          <input type="checkbox" checked={form.is_team} onChange={e => setForm({ ...form, is_team: e.target.checked })} />
+          <input type="checkbox" checked={form.is_team} onChange={e => { const checked = e.target.checked; setForm({ ...form, is_team: checked }); if (checked && !groupMembers.length) setGroupMembers([{ student_id: '', student_name: '', lookup: '' }]); }} />
           Group entry (more than one performer)
         </label>
         {form.is_team && (
           <>
-            <label>Other group members (comma separated)</label>
-            <input value={form.team_members} onChange={e => setForm({ ...form, team_members: e.target.value })} />
+            <p className="muted small">Enter each member’s Student ID to look up their existing details. If they aren’t registered yet, enter their name and Student ID when prompted.</p>
+            {groupMembers.map((member, index) => <div className="card" key={index}>
+              <h4>Group member {index + 1}</h4>
+              <label>Student ID</label>
+              <input value={member.student_id} onChange={event => updateGroupMember(index, { student_id: event.target.value.toUpperCase(), student_name: '', lookup: '' })}
+                onBlur={() => lookupGroupMember(index)} pattern="\d{4}[A-Za-z]{2,3}\d{3}" placeholder="e.g. 2023CSE001" required />
+              {member.lookup === 'loading' && <p className="muted small">Looking up student…</p>}
+              {member.lookup === 'found' && <p className="success small">{member.student_name}{member.team_name ? ` · ${member.team_name}` : ''}</p>}
+              {member.lookup === 'missing' && <>
+                {member.lookup_error ? <p className="error small">{member.lookup_error}</p> : <p className="error small">Student not found. Enter their full name and Student ID.</p>}
+                <label>Full name</label>
+                <input value={member.student_name} onChange={event => updateGroupMember(index, { student_name: event.target.value })} required />
+              </>}
+              {groupMembers.length > 1 && <button type="button" className="danger" onClick={() => setGroupMembers(current => current.filter((_, i) => i !== index))}>Remove member</button>}
+            </div>)}
+            {groupMembers.length < 24 && <button type="button" className="secondary" onClick={() => setGroupMembers(current => [...current, { student_id: '', student_name: '', lookup: '' }])}>Add group member</button>}
           </>
         )}
         </>}
@@ -160,6 +193,7 @@ export default function Register() {
         <div className="success-box">
           <strong>Registered!</strong>
           <p>Your Team: <TeamBadge name={result.team_name} /></p>
+          {result.team_roster?.length > 0 && <><p><strong>Group members</strong></p><ul>{result.team_roster.map(member => <li key={member.student_id}>{member.student_name} · {member.student_id}</li>)}</ul></>}
           <p className="muted small">Your registration is saved. An organizer will assign your performance code; use My Results to check your program and results.</p>
         </div>
       )}

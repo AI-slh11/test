@@ -107,6 +107,7 @@ export const api = {
   checkin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`, { method: 'POST' }),
   undoCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`, { method: 'DELETE' }),
   lookupCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`),
+  lookupStudent: (studentId) => request(`/registrations/lookup-student/${encodeURIComponent(studentId)}`),
   judgeView: (programId) => request(`/registrations/judge-view?program_id=${programId}`),
   setStatus: (id, status) => request(`/registrations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 

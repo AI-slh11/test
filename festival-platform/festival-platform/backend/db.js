@@ -102,6 +102,7 @@ const hasCol = (table, col) => db.prepare(`PRAGMA table_info(${table})`).all().s
 if (!hasCol('registrations', 'team_name')) db.exec('ALTER TABLE registrations ADD COLUMN team_name TEXT');
 if (!hasCol('registrations', 'team_leader_name')) db.exec('ALTER TABLE registrations ADD COLUMN team_leader_name TEXT');
 if (!hasCol('registrations', 'team_leader_id')) db.exec('ALTER TABLE registrations ADD COLUMN team_leader_id TEXT');
+if (!hasCol('registrations', 'team_roster')) db.exec('ALTER TABLE registrations ADD COLUMN team_roster TEXT');
 if (!hasCol('registrations', 'result_place')) {
   db.exec('ALTER TABLE registrations ADD COLUMN result_place INTEGER CHECK (result_place IS NULL OR result_place BETWEEN 1 AND 3)');
 }
