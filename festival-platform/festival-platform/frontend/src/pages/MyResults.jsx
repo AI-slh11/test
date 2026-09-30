@@ -19,6 +19,8 @@ export default function MyResults() {
   const [error, setError] = useState('');
   const [alertsOn, setAlertsOn] = useState(false);
   const [alertMessage, setAlertMessage] = useState('');
+  const [downloadingCertificate, setDownloadingCertificate] = useState(null);
+  const [certificateError, setCertificateError] = useState(null);
   const knownResults = useRef(new Set());
 
   useEffect(() => {
@@ -59,6 +61,18 @@ export default function MyResults() {
       setError(err.message || 'Could not look up your programs. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadCertificate = async (item) => {
+    setDownloadingCertificate(item.registration_id);
+    setCertificateError(null);
+    try {
+      await api.downloadStudentCertificate(item.registration_id, studentId);
+    } catch (err) {
+      setCertificateError({ registrationId: item.registration_id, message: err.message || 'Could not generate your certificate.' });
+    } finally {
+      setDownloadingCertificate(null);
     }
   };
 
@@ -125,6 +139,11 @@ export default function MyResults() {
                   </div>
                 ) : <p className="muted">Results are published, but no final score is available for this entry.</p>
               ) : <p className="muted">Final results have not been published yet.</p>}
+              {item.results_published && item.result && item.result.rank <= 3 && <button type="button" disabled={downloadingCertificate != null}
+                onClick={() => downloadCertificate(item)}>
+                {downloadingCertificate === item.registration_id ? 'Generating certificate…' : 'Download my certificate'}
+              </button>}
+              {certificateError?.registrationId === item.registration_id && <p className="error" role="alert">{certificateError.message}</p>}
             </article>
           ))}
         </div>

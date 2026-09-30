@@ -37,6 +37,24 @@ async function downloadCertificate(programId, registrationId) {
   window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }
 
+async function downloadStudentCertificate(registrationId, studentId) {
+  const url = `${BASE}/results/student-certificate/${registrationId}?student_id=${encodeURIComponent(studentId)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    let data = {};
+    try { data = await res.json(); } catch {}
+    throw new Error(data.error || 'Could not generate certificate');
+  }
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const link = document.createElement('a');
+  link.href = objectUrl;
+  link.download = `certificate-${registrationId}.pdf`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+}
+
 async function downloadCertificatesZip(programId, winners) {
   const zip = new JSZip();
   const token = getAuthToken();
@@ -141,6 +159,7 @@ export const api = {
   setResultPlaces: (programId, placements, teamPoints) => request(`/results/${programId}/placements`, { method: 'PUT', body: JSON.stringify({ placements, team_points: teamPoints }) }),
   results: (programId) => request(`/results/${programId}`),
   downloadCertificate,
+  downloadStudentCertificate,
   downloadCertificatesZip,
   certificateUrl: (programId, registrationId) => `${BASE}/results/${programId}/certificate/${registrationId}`
 };

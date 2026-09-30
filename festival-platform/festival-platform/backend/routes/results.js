@@ -121,7 +121,8 @@ router.post('/student-lookup', (req, res) => {
       if (ranked) result = { rank: ranked.rank, average_score: ranked.average_score };
     }
 
-    return {
+      return {
+      registration_id: registration.registration_id,
       participant_id: String(registration.code_letter).startsWith('PENDING-') ? null : registration.participant_id,
       code_letter: String(registration.code_letter).startsWith('PENDING-') ? null : registration.code_letter,
       code_assigned: !String(registration.code_letter).startsWith('PENDING-'),
@@ -257,8 +258,7 @@ router.get('/:programId', requireRole('organizer'), (req, res) => {
 });
 
 // Certificate PDF for a placed participant (1st/2nd/3rd), with the festival's branded template.
-router.get('/:programId/certificate/:registrationId', requireRole('organizer'), (req, res) => {
-  const { programId, registrationId } = req.params;
+function sendCertificate(res, programId, registrationId) {
   const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
   if (!program) return res.status(404).json({ error: 'Program not found' });
   if (!program.results_published) return res.status(403).json({ error: 'Certificates are available after results are published' });
@@ -324,6 +324,18 @@ router.get('/:programId/certificate/:registrationId', requireRole('organizer'), 
     doc.image(footerPath, (width - footerWidth) / 2, height - 98, { fit: [footerWidth, 32], align: 'center', valign: 'center' });
   }
   doc.end();
+}
+
+router.get('/student-certificate/:registrationId', (req, res) => {
+  const studentId = String(req.query.student_id || '').trim().toUpperCase();
+  if (!STUDENT_ID_RE.test(studentId)) return res.status(400).json({ error: 'Enter a valid Student ID' });
+  const registration = db.prepare('SELECT id, program_id, student_id FROM registrations WHERE id = ?').get(req.params.registrationId);
+  if (!registration || registration.student_id !== studentId) return res.status(404).json({ error: 'No matching student registration was found' });
+  sendCertificate(res, registration.program_id, registration.id);
+});
+
+router.get('/:programId/certificate/:registrationId', requireRole('organizer'), (req, res) => {
+  sendCertificate(res, req.params.programId, req.params.registrationId);
 });
 
 module.exports = router;
