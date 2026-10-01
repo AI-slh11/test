@@ -36,6 +36,15 @@ router.get('/lookup-student/:studentId', (req, res) => {
   res.json(student);
 });
 
+router.get('/individual-stage-count/:studentId', (req, res) => {
+  const studentId = String(req.params.studentId || '').trim().toUpperCase();
+  if (!STUDENT_ID_RE.test(studentId)) return res.status(400).json({ error: 'Enter a valid Student ID first' });
+  const count = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count
+    FROM registrations r JOIN programs p ON p.id = r.program_id
+    WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage'`).get(studentId).count;
+  res.json({ count, limit: 5, remaining: Math.max(0, 5 - count) });
+});
+
 // Register a student for a program. Works identically for organizer on-site (Green Room)
 // registration and public online self-registration; `source` distinguishes them.
 router.post('/', optionalAuth, (req, res) => {
@@ -94,6 +103,14 @@ router.post('/', optionalAuth, (req, res) => {
 
   const duplicate = db.prepare('SELECT id FROM registrations WHERE program_id = ? AND student_id = ?').get(program_id, studentId);
   if (duplicate) return res.status(409).json({ error: 'This Student ID is already registered for this program' });
+  if (!is_team && program.type === 'stage') {
+    const stageCount = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count
+      FROM registrations r JOIN programs p ON p.id = r.program_id
+      WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage'`).get(studentId).count;
+    if (stageCount >= 5) {
+      return res.status(409).json({ error: 'Each student may register for a maximum of 5 Stage programs individually. This Student ID has already reached that limit. Group entries do not count toward the individual limit.' });
+    }
+  }
   const existingCount = db.prepare('SELECT COUNT(*) c FROM registrations WHERE program_id = ?').get(program_id).c;
   if (program.quota && existingCount >= program.quota) {
     return res.status(409).json({ error: `Registration closed — this program is full (${program.quota} spots)` });

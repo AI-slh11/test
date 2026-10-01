@@ -20,6 +20,7 @@ export default function Register() {
   const [submissionReport, setSubmissionReport] = useState([]);
   const [completedPairs, setCompletedPairs] = useState({});
   const [groupMembers, setGroupMembers] = useState([]);
+  const [stageCount, setStageCount] = useState(null);
 
   useEffect(() => {
     api.listPrograms().then(p => { setPrograms(p); setLoadState('ok'); }).catch(() => setLoadState('failed'));
@@ -28,6 +29,12 @@ export default function Register() {
   const categoryPrograms = programs.filter(p => category === 'general' ? !p.category : p.category === category);
   const selectedPrograms = selectedProgramIds.map(id => programs.find(p => String(p.id) === String(id))).filter(Boolean);
   const needsLanguage = selectedPrograms.some(program => program.type === 'writing' && !program.language);
+  const lookupStageCount = async value => {
+    const studentId = String(value || '').trim().toUpperCase();
+    if (!/^\d{4}[A-Z]{2,3}\d{3}$/.test(studentId)) { setStageCount(null); return; }
+    try { setStageCount({ studentId, ...(await api.individualStageCount(studentId)) }); }
+    catch { setStageCount(null); }
+  };
   const updateGroupMember = (index, changes) => setGroupMembers(current => current.map((member, i) => i === index ? { ...member, ...changes } : member));
   const lookupGroupMember = async (index) => {
     const studentId = String(groupMembers[index]?.student_id || '').trim().toUpperCase();
@@ -137,6 +144,7 @@ export default function Register() {
           </label>;
         })}
         {!!selectedPrograms.length && <p className="muted small">Selected {selectedPrograms.length} program{selectedPrograms.length === 1 ? '' : 's'}. Each registration is saved separately; if one fails, the others remain saved and only failed selections will retry.</p>}
+        <p className="muted small">Individual participants may register for up to 5 Stage programs. Group entries do not count toward this limit.</p>
 
         {selectedPrograms.length > 0 && <p className="muted small">The organizers will assign performance codes after registration. You can check your programs and results later using My Results.</p>}
 
@@ -180,6 +188,7 @@ export default function Register() {
         <input
           value={form.student_id}
           onChange={e => setForm({ ...form, student_id: e.target.value.toUpperCase() })}
+          onBlur={e => lookupStageCount(e.target.value)}
           pattern="\d{4}[A-Za-z]{2,3}\d{3}"
           title="4 digits, 2-3 letters, 3 digits — e.g. 2023CSE001"
           placeholder="e.g. 2023CSE001"
@@ -187,6 +196,9 @@ export default function Register() {
           required
         />
         <p className="muted small">Format: 4 digits, 2–3 letters, 3 digits. You're registered instantly — no approval needed.</p>
+        {stageCount?.studentId === form.student_id.trim().toUpperCase() && !form.is_team && <p className={stageCount.remaining === 0 ? 'error small' : 'muted small'} role="status">
+          Individual Stage programs: {stageCount.count} of 5 registered; {stageCount.remaining} remaining.
+        </p>}
 
         <label className="checkbox">
           <input type="checkbox" checked={form.is_team} onChange={e => { const checked = e.target.checked; setForm({ ...form, is_team: checked }); if (checked && !groupMembers.length) setGroupMembers([{ student_id: '', student_name: '', lookup: '' }]); }} />

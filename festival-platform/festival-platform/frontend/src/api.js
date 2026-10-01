@@ -127,6 +127,7 @@ export const api = {
   undoCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`, { method: 'DELETE' }),
   lookupCheckin: (participantId) => request(`/registrations/checkin/${encodeURIComponent(participantId)}`),
   lookupStudent: (studentId) => request(`/registrations/lookup-student/${encodeURIComponent(studentId)}`),
+  individualStageCount: (studentId) => request(`/registrations/individual-stage-count/${encodeURIComponent(studentId)}`),
   judgeView: (programId) => request(`/registrations/judge-view?program_id=${programId}`),
   setStatus: (id, status) => request(`/registrations/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) }),
 
