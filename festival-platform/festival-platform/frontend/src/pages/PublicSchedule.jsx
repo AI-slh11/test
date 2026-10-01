@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../api.js';
+import { CATEGORIES } from '../categories.js';
 
 const timeLabel = (value) => value ? new Date(`2000-01-01T${value}:00`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
 
@@ -17,7 +18,7 @@ export function ScheduleSection({ compact = false }) {
     {error ? <p className="muted">The schedule could not be loaded right now.</p> : !shown.length ? <p className="muted">The organizers have not published any sessions yet. Please check back later.</p> :
       <div className="public-schedule-list">{shown.map(item => <article className="public-schedule-item" key={item.id}>
         <div className="public-schedule-time"><strong>{timeLabel(item.start_time)}</strong>{item.end_time && <span>to {timeLabel(item.end_time)}</span>}</div>
-        <div className="public-schedule-content"><h3>{item.title}</h3><p>{new Date(`${item.schedule_date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}{item.venue ? ` · ${item.venue}` : ''}</p>{item.notes && <p className="public-schedule-notes">{item.notes}</p>}</div>
+        <div className="public-schedule-content"><h3>{item.title}</h3><p><strong>{item.category === 'all' ? 'All categories' : CATEGORIES.find(category => category.key === item.category)?.label || 'Category not set'}</strong> · {new Date(`${item.schedule_date}T00:00:00`).toLocaleDateString(undefined, { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}{item.venue ? ` · ${item.venue}` : ''}</p>{item.notes && <p className="public-schedule-notes">{item.notes}</p>}</div>
       </article>)}</div>}
   </section>;
 }

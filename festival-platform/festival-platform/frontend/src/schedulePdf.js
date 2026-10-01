@@ -1,3 +1,5 @@
+import { CATEGORIES } from './categories.js';
+
 const dateLabel = value => new Date(`${value}T00:00:00`).toLocaleDateString(undefined, {
   weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
 });
@@ -57,6 +59,7 @@ export async function downloadSchedulePdf(items) {
     const titleLines = pdf.splitTextToSize(String(item.title || 'Untitled session'), contentWidth - 28);
     const detailLines = item.notes ? pdf.splitTextToSize(String(item.notes), contentWidth - 28) : [];
     const meta = [
+      item.category === 'all' ? 'All categories' : CATEGORIES.find(category => category.key === item.category)?.label || 'Category not set',
       [timeLabel(item.start_time), item.end_time ? timeLabel(item.end_time) : ''].filter(Boolean).join(' - '),
       item.venue || ''
     ].filter(Boolean).join('   |   ');

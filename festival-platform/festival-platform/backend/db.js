@@ -134,6 +134,8 @@ db.exec(`CREATE TABLE IF NOT EXISTS schedule_items (
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
 )`);
+// Add a nullable category to existing schedule rows without rewriting them.
+if (!hasCol('schedule_items', 'category')) db.exec('ALTER TABLE schedule_items ADD COLUMN category TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS idx_schedule_public_order ON schedule_items(published, schedule_date, start_time, sort_order, id)');
 
 // Hidden admin accounts (separate from organizer/judge users). Passwords are stored as scrypt hashes.

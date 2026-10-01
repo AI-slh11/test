@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { downloadSchedulePdf } from '../schedulePdf.js';
+import { CATEGORIES } from '../categories.js';
 
-const blank = () => ({ title: '', schedule_date: '', start_time: '', end_time: '', venue: '', notes: '', published: false });
+const blank = () => ({ title: '', schedule_date: '', start_time: '', end_time: '', venue: '', notes: '', category: '', published: false });
 const timeLabel = (value) => value ? new Date(`2000-01-01T${value}:00`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
 
 export default function ScheduleAdmin() {
@@ -31,7 +32,7 @@ export default function ScheduleAdmin() {
   const edit = (item) => {
     setEditingId(item.id);
     setForm({ title: item.title, schedule_date: item.schedule_date, start_time: item.start_time,
-      end_time: item.end_time || '', venue: item.venue || '', notes: item.notes || '', published: item.published });
+      end_time: item.end_time || '', venue: item.venue || '', notes: item.notes || '', category: item.category || '', published: item.published });
     setError(''); setMessage('');
     document.getElementById('schedule-editor')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   };
@@ -71,6 +72,11 @@ export default function ScheduleAdmin() {
     <form id="schedule-editor" className="schedule-form" onSubmit={submit}>
       <h4>{editingId ? 'Edit schedule item' : 'Add a session'}</h4>
       <label>Session title<input required maxLength="160" value={form.title} onChange={e => set('title', e.target.value)} placeholder="e.g. Opening ceremony" /></label>
+      <label>Category<select required value={form.category} onChange={e => set('category', e.target.value)}>
+        <option value="">Choose a category...</option>
+        {CATEGORIES.map(item => <option key={item.key} value={item.key}>{item.label}</option>)}
+        <option value="all">All categories</option>
+      </select></label>
       <div className="grid-2">
         <label>Date<input type="date" required value={form.schedule_date} onChange={e => set('schedule_date', e.target.value)} /></label>
         <label>Venue<input maxLength="200" value={form.venue} onChange={e => set('venue', e.target.value)} placeholder="Stage or room" /></label>
@@ -85,7 +91,7 @@ export default function ScheduleAdmin() {
     <h4>Schedule entries ({items.length})</h4>
     {!items.length ? <p className="muted">No sessions yet. Add the first one above.</p> : <div className="schedule-admin-list">
       {items.map(item => <article className="schedule-admin-item" key={item.id}>
-        <div><strong>{item.title}</strong><p className="muted">{new Date(`${item.schedule_date}T00:00:00`).toLocaleDateString()} · {timeLabel(item.start_time)}{item.end_time ? `–${timeLabel(item.end_time)}` : ''}{item.venue ? ` · ${item.venue}` : ''}</p>
+        <div><strong>{item.title}</strong><p className="muted">{item.category === 'all' ? 'All categories' : CATEGORIES.find(category => category.key === item.category)?.label || 'Category not set'} · {new Date(`${item.schedule_date}T00:00:00`).toLocaleDateString()} · {timeLabel(item.start_time)}{item.end_time ? `–${timeLabel(item.end_time)}` : ''}{item.venue ? ` · ${item.venue}` : ''}</p>
           {item.notes && <p>{item.notes}</p>}</div>
         <div className="row-actions"><span className={item.published ? 'schedule-status published' : 'schedule-status'}>{item.published ? 'Public' : 'Draft'}</span>
           <button className="secondary" disabled={busy} onClick={() => togglePublished(item)}>{item.published ? 'Unpublish' : 'Publish'}</button>

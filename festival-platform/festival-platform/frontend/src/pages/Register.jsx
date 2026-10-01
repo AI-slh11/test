@@ -1,23 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
-import TeamBadge from '../TeamBadge.jsx';
-import { CATEGORIES } from '../categories.js';
+import { CATEGORIES, programLabel } from '../categories.js';
 
 export default function Register() {
   const [programs, setPrograms] = useState([]);
   const [category, setCategory] = useState('');
+  const [selectedProgramIds, setSelectedProgramIds] = useState([]);
   const [form, setForm] = useState({
     program_id: '', student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: ''
   });
-  const [result, setResult] = useState(null);
   const [error, setError] = useState('');
+  const [message, setMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const [loadState, setLoadState] = useState('loading'); // loading | ok | failed
   const [teamLeaderMode, setTeamLeaderMode] = useState(false);
   const [leader, setLeader] = useState({ name: '', student_id: '' });
   const [roster, setRoster] = useState([{ student_name: '', student_id: '' }]);
-  const [batchResult, setBatchResult] = useState(null);
-  const [batchErrors, setBatchErrors] = useState([]);
+  const [submissionReport, setSubmissionReport] = useState([]);
+  const [completedPairs, setCompletedPairs] = useState({});
   const [groupMembers, setGroupMembers] = useState([]);
 
   useEffect(() => {
@@ -25,7 +26,8 @@ export default function Register() {
   }, []);
 
   const categoryPrograms = programs.filter(p => category === 'general' ? !p.category : p.category === category);
-  const selectedProgram = programs.find(p => String(p.id) === String(form.program_id));
+  const selectedPrograms = selectedProgramIds.map(id => programs.find(p => String(p.id) === String(id))).filter(Boolean);
+  const needsLanguage = selectedPrograms.some(program => program.type === 'writing' && !program.language);
   const updateGroupMember = (index, changes) => setGroupMembers(current => current.map((member, i) => i === index ? { ...member, ...changes } : member));
   const lookupGroupMember = async (index) => {
     const studentId = String(groupMembers[index]?.student_id || '').trim().toUpperCase();
@@ -40,39 +42,65 @@ export default function Register() {
   };
   const submit = async (e) => {
     e.preventDefault();
-    setError(''); setResult(null); setBatchResult(null); setBatchErrors([]);
+    setError(''); setSubmissionReport([]);
+    setMessage(''); setSubmitting(true);
     try {
+      if (!selectedPrograms.length) throw new Error('Choose at least one program.');
+      const report = [];
+      const successfulPairs = { ...completedPairs };
       if (teamLeaderMode) {
         const entries = roster.filter(row => row.student_name.trim() || row.student_id.trim());
         if (!entries.length) throw new Error('Add at least one student to the roster.');
         const ids = entries.map(row => row.student_id.trim().toUpperCase());
         if (new Set(ids).size !== ids.length) throw new Error('The roster has a duplicate Student ID. Correct it before submitting.');
-        const completed = [];
-        const failures = [];
-        const failedEntries = [];
         for (const student of entries) {
-          try {
-            const { registration } = await api.register({ ...form, ...student, language: form.language || selectedProgram?.language || '', source: 'online', team_leader_name: leader.name, team_leader_id: leader.student_id });
-            completed.push(registration);
-          } catch (err) { failures.push(`${student.student_name || student.student_id}: ${err.message}`); failedEntries.push(student); }
+          for (const program of selectedPrograms) {
+            const pairKey = `${student.student_id.trim().toUpperCase()}|${program.id}`;
+            if (successfulPairs[pairKey]) continue;
+            try {
+              const { registration } = await api.register({ ...form, ...student, program_id: program.id, language: form.language || program.language || '', source: 'online', team_leader_name: leader.name, team_leader_id: leader.student_id });
+              successfulPairs[pairKey] = true;
+              report.push({ student: student.student_name || student.student_id, program: programLabel(program), registration });
+            } catch (err) { report.push({ student: student.student_name || student.student_id, program: programLabel(program), error: err.message }); }
+          }
         }
-        setBatchResult(completed);
-        setBatchErrors(failures);
-        setRoster(failedEntries.length ? failedEntries : [{ student_name: '', student_id: '' }]);
-        return;
+      } else {
+        const additionalMembers = form.is_team ? groupMembers : [];
+        if (form.is_team && additionalMembers.length < 1) throw new Error('Add at least one other group member and enter their Student ID.');
+        const memberIds = additionalMembers.map(member => String(member.student_id || '').trim().toUpperCase());
+        if (memberIds.includes(String(form.student_id).trim().toUpperCase()) || new Set(memberIds).size !== memberIds.length) {
+          throw new Error('Each student must have a different Student ID.');
+        }
+        const studentKey = String(form.student_id).trim().toUpperCase();
+        for (const program of selectedPrograms) {
+          const pairKey = `${studentKey}|${program.id}`;
+          if (successfulPairs[pairKey]) continue;
+          try {
+            const { registration } = await api.register({ ...form, program_id: program.id, team_roster: additionalMembers.map(({ student_id, student_name }) => ({ student_id, student_name })), language: form.language || program.language || '', source: 'online' });
+            successfulPairs[pairKey] = true;
+            report.push({ student: form.student_name, program: programLabel(program), registration });
+          } catch (err) { report.push({ student: form.student_name, program: programLabel(program), error: err.message }); }
+        }
       }
-      const additionalMembers = form.is_team ? groupMembers : [];
-      if (form.is_team && additionalMembers.length < 1) throw new Error('Add at least one other group member and enter their Student ID.');
-      const memberIds = additionalMembers.map(member => String(member.student_id || '').trim().toUpperCase());
-      if (memberIds.includes(String(form.student_id).trim().toUpperCase()) || new Set(memberIds).size !== memberIds.length) {
-        throw new Error('Each student must have a different Student ID.');
+      setCompletedPairs(successfulPairs);
+      setSubmissionReport(report);
+      const totalPairs = (teamLeaderMode ? roster.filter(row => row.student_name.trim() || row.student_id.trim()).length : 1) * selectedPrograms.length;
+      const succeeded = report.some(entry => entry.registration);
+      const allSelectedCompleted = (teamLeaderMode
+        ? roster.filter(row => row.student_name.trim() || row.student_id.trim()).every(student => selectedPrograms.every(program => successfulPairs[`${student.student_id.trim().toUpperCase()}|${program.id}`]))
+        : selectedPrograms.every(program => successfulPairs[`${String(form.student_id).trim().toUpperCase()}|${program.id}`]));
+      if (allSelectedCompleted && totalPairs > 0) {
+        setMessage(`${totalPairs} registration${totalPairs === 1 ? '' : 's'} saved successfully.`);
+        setSelectedProgramIds([]);
+        setCompletedPairs({});
+        if (teamLeaderMode) setRoster([{ student_name: '', student_id: '' }]);
+        else setForm(current => ({ ...current, student_name: '', student_id: '', is_team: false, team_members: '', language: '' }));
+      } else if (succeeded) {
+        setMessage('Some registrations were saved. Failed program/student pairs are listed below; submit again to retry only those pairs.');
       }
-      const { registration } = await api.register({ ...form, team_roster: additionalMembers.map(({ student_id, student_name }) => ({ student_id, student_name })), language: form.language || selectedProgram?.language || '', source: 'online' });
-      setResult(registration);
-      setForm({ program_id: '', student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '' });
     } catch (err) {
       setError(err.message);
-    }
+    } finally { setSubmitting(false); }
   };
 
   return (
@@ -80,27 +108,37 @@ export default function Register() {
       <h2>Student Registration</h2>
       <p className="muted">Same form for stage & writing programs. Open to all campus members.</p>
       <form onSubmit={submit}>
-        <label className="checkbox"><input type="checkbox" checked={teamLeaderMode} onChange={event => { setTeamLeaderMode(event.target.checked); setError(''); setBatchResult(null); }} /> I’m a team leader registering multiple students</label>
+        <label className="checkbox"><input type="checkbox" checked={teamLeaderMode} onChange={event => { setTeamLeaderMode(event.target.checked); setError(''); setSubmissionReport([]); setCompletedPairs({}); }} /> I’m a team leader registering multiple students</label>
         <label>Category</label>
         <div className="team-choice">
           {CATEGORIES.map(c => (
             <label key={c.key} className={`team-option ${category === c.key ? 'selected' : ''}`}>
               <input type="radio" name="category" value={c.key} checked={category === c.key}
-                onChange={() => { setCategory(c.key); setForm({ ...form, program_id: '', language: '' }); }} required />
+                onChange={() => { setCategory(c.key); setSelectedProgramIds([]); setForm({ ...form, program_id: '', language: '' }); setSubmissionReport([]); }} required />
               <strong>{c.label}</strong>
             </label>
           ))}
         </div>
 
-        <label>Program</label>
-        <select value={form.program_id} onChange={e => setForm({ ...form, program_id: e.target.value })} required disabled={!category}>
-          <option value="">{category ? 'Select a program...' : 'Choose a category first'}</option>
-          {categoryPrograms.map(p => (
-            <option key={p.id} value={p.id}>{p.number ? `${p.number}. ` : ''}{p.name}{p.time_slot ? ` — ${p.time_slot}` : ''}</option>
-          ))}
-        </select>
+        <label>Programs (select one or more)</label>
+        {!category && <p className="muted small">Choose a category first.</p>}
+        {categoryPrograms.map(program => {
+          const isSelected = selectedProgramIds.includes(String(program.id));
+          const isFull = program.quota != null && Number(program.registration_count) >= Number(program.quota);
+          return <label className="checkbox" key={program.id}>
+            <input type="checkbox" checked={isSelected} disabled={!isSelected && isFull}
+              onChange={event => {
+                setSelectedProgramIds(current => event.target.checked
+                  ? [...current, String(program.id)]
+                  : current.filter(id => id !== String(program.id)));
+                setSubmissionReport([]); setMessage('');
+              }} />
+            <span>{program.number ? `${program.number}. ` : ''}{program.name}{program.time_slot ? ` — ${program.time_slot}` : ''}{isFull ? ' · Registration full' : ''}</span>
+          </label>;
+        })}
+        {!!selectedPrograms.length && <p className="muted small">Selected {selectedPrograms.length} program{selectedPrograms.length === 1 ? '' : 's'}. Each registration is saved separately; if one fails, the others remain saved and only failed selections will retry.</p>}
 
-        {selectedProgram && <p className="muted small">The organizers will assign performance codes after registration. You can check your program and results later using My Results.</p>}
+        {selectedPrograms.length > 0 && <p className="muted small">The organizers will assign performance codes after registration. You can check your programs and results later using My Results.</p>}
 
         {loadState === 'failed' && <p className="error">Couldn't load programs — the server isn't reachable. Please try again in a moment.</p>}
         {loadState === 'ok' && programs.length === 0 && <p className="error">No programs have been created yet.</p>}
@@ -176,7 +214,7 @@ export default function Register() {
         )}
         </>}
 
-        {selectedProgram?.type === 'writing' && !selectedProgram.language && (
+        {needsLanguage && (
           <>
             <label>Language</label>
             <input value={form.language} onChange={e => setForm({ ...form, language: e.target.value })}
@@ -186,19 +224,17 @@ export default function Register() {
         )}
 
         {error && <p className="error">{error}</p>}
-        <button type="submit">{teamLeaderMode ? 'Register student roster' : 'Register'}</button>
+        {message && <p className="success" role="status">{message}</p>}
+        <button type="submit" disabled={submitting}>{submitting ? 'Registering…' : teamLeaderMode ? 'Register student roster' : 'Register'}</button>
       </form>
 
-      {result && (
-        <div className="success-box">
-          <strong>Registered!</strong>
-          <p>Your Team: <TeamBadge name={result.team_name} /></p>
-          {result.team_roster?.length > 0 && <><p><strong>Group members</strong></p><ul>{result.team_roster.map(member => <li key={member.student_id}>{member.student_name} · {member.student_id}</li>)}</ul></>}
-          <p className="muted small">Your registration is saved. An organizer will assign your performance code; use My Results to check your program and results.</p>
-        </div>
-      )}
-      {batchResult && <div className="success-box"><strong>Roster registered: {batchResult.length} students</strong>{batchResult.map((item, index) => <p key={item.id || index}>{item.student_name} · code pending organizer assignment</p>)}<p className="muted small">Each student can use their Student ID on My Results to see this program.</p></div>}
-      {batchErrors.map((message, index) => <p className="error" key={index}>{message}</p>)}
+      {submissionReport.length > 0 && <div className="success-box" role="status">
+        <strong>Registration summary</strong>
+        {submissionReport.map((entry, index) => <p className={entry.error ? 'error' : 'success'} key={`${entry.student}-${entry.program}-${index}`}>
+          {entry.student} · {entry.program}: {entry.error ? `Not registered — ${entry.error}` : 'Registered; organizer code pending'}
+        </p>)}
+        <p className="muted small">Successful registrations are saved individually and are not removed if another selected program has an issue.</p>
+      </div>}
     </div>
   );
 }

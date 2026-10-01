@@ -11,10 +11,11 @@ const validDate = (value) => {
 };
 const validTime = (value) => /^([01]\d|2[0-3]):[0-5]\d$/.test(value || '');
 const clean = (value, max) => String(value || '').trim().slice(0, max);
+const validCategory = value => !value || ['premier', 'junior', 'general', 'all'].includes(value);
 
 router.get('/', optionalAuth, (req, res) => {
   const organizer = req.user?.role === 'organizer' || !!req.admin;
-  const rows = db.prepare(`SELECT id, title, schedule_date, start_time, end_time, venue, notes,
+  const rows = db.prepare(`SELECT id, title, schedule_date, start_time, end_time, venue, notes, category,
       published, sort_order, created_at, updated_at
     FROM schedule_items ${organizer ? '' : 'WHERE published = 1'}
     ORDER BY schedule_date, start_time, sort_order, id`).all();
@@ -26,14 +27,16 @@ router.post('/', requireOrganizerOrControlAdmin, (req, res) => {
   const scheduleDate = clean(req.body?.schedule_date, 10);
   const startTime = clean(req.body?.start_time, 5);
   const endTime = clean(req.body?.end_time, 5);
+  const category = clean(req.body?.category, 20) || null;
   if (!title || !validDate(scheduleDate) || !validTime(startTime) || (endTime && !validTime(endTime))) {
     return res.status(400).json({ error: 'Enter a title, valid date and start time. End time is optional.' });
   }
+  if (!validCategory(category)) return res.status(400).json({ error: 'Category must be Premier, Junior, General, or All categories.' });
   if (endTime && endTime <= startTime) return res.status(400).json({ error: 'End time must be after the start time.' });
   const result = db.prepare(`INSERT INTO schedule_items
-    (title, schedule_date, start_time, end_time, venue, notes, published)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`).run(title, scheduleDate, startTime, endTime || null,
-      clean(req.body.venue, 200) || null, clean(req.body.notes, 1000) || null, req.body.published ? 1 : 0);
+    (title, schedule_date, start_time, end_time, venue, notes, category, published)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(title, scheduleDate, startTime, endTime || null,
+      clean(req.body.venue, 200) || null, clean(req.body.notes, 1000) || null, category, req.body.published ? 1 : 0);
   recordAudit(req, 'create', 'schedule_item', result.lastInsertRowid, { title, schedule_date: scheduleDate });
   res.status(201).json({ id: result.lastInsertRowid });
 });
@@ -46,15 +49,17 @@ router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const scheduleDate = clean(b.schedule_date ?? current.schedule_date, 10);
   const startTime = clean(b.start_time ?? current.start_time, 5);
   const endTime = clean(b.end_time ?? current.end_time, 5);
+  const category = b.category === undefined ? current.category : (clean(b.category, 20) || null);
   if (!title || !validDate(scheduleDate) || !validTime(startTime) || (endTime && !validTime(endTime))) {
     return res.status(400).json({ error: 'Enter a title, valid date and start time. End time is optional.' });
   }
+  if (!validCategory(category)) return res.status(400).json({ error: 'Category must be Premier, Junior, General, or All categories.' });
   if (endTime && endTime <= startTime) return res.status(400).json({ error: 'End time must be after the start time.' });
   const published = 'published' in b ? (b.published ? 1 : 0) : current.published;
   db.prepare(`UPDATE schedule_items SET title = ?, schedule_date = ?, start_time = ?, end_time = ?,
-    venue = ?, notes = ?, published = ?, updated_at = datetime('now') WHERE id = ?`)
+    venue = ?, notes = ?, category = ?, published = ?, updated_at = datetime('now') WHERE id = ?`)
     .run(title, scheduleDate, startTime, endTime || null, clean(b.venue ?? current.venue, 200) || null,
-      clean(b.notes ?? current.notes, 1000) || null, published, current.id);
+      clean(b.notes ?? current.notes, 1000) || null, category, published, current.id);
   recordAudit(req, 'update', 'schedule_item', current.id, { title, schedule_date: scheduleDate, published: !!published });
   res.json({ ok: true });
 });
