@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { downloadSchedulePdf } from '../schedulePdf.js';
 
 const blank = () => ({ title: '', schedule_date: '', start_time: '', end_time: '', venue: '', notes: '', published: false });
 const timeLabel = (value) => value ? new Date(`2000-01-01T${value}:00`).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '';
@@ -59,7 +60,13 @@ export default function ScheduleAdmin() {
 
   return <div className="card schedule-admin">
     <div className="schedule-admin-head"><div><h3>Shared schedule</h3><p className="muted">Add sessions, then publish them to make them visible to everyone.</p></div>
-      <button className="secondary" onClick={copyLink}>Copy public schedule link</button></div>
+      <div className="row-actions">
+        <button className="secondary" disabled={!items.length} onClick={async () => {
+          try { await downloadSchedulePdf(items); setMessage('Organizer schedule PDF downloaded.'); }
+          catch (e) { setError(e.message || 'Could not download the schedule PDF.'); }
+        }}>Download schedule PDF</button>
+        <button className="secondary" onClick={copyLink}>Copy public schedule link</button>
+      </div></div>
     {error && <p className="error" role="alert">{error}</p>}{message && <p className="success" role="status">{message}</p>}
     <form id="schedule-editor" className="schedule-form" onSubmit={submit}>
       <h4>{editingId ? 'Edit schedule item' : 'Add a session'}</h4>
