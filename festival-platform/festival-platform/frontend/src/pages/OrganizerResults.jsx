@@ -158,6 +158,21 @@ export default function OrganizerResults({ programs }) {
     }
   };
 
+  const refreshPausedTotals = async () => {
+    setPauseSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await api.setTotalPointsPaused(true);
+      setPointsVisibility(current => ({ ...current, ...saved }));
+      setMessage('Paused totals refreshed from all results currently published. Result records and assigned points are unchanged.');
+    } catch (e) {
+      setError(e.message || 'Could not refresh the paused totals.');
+    } finally {
+      setPauseSaving(false);
+    }
+  };
+
   const scoreFor = (participant, judgeId) => participant.scores.find(score => score.judge_id === judgeId);
 
   const saveScore = async (e) => {
@@ -234,6 +249,10 @@ export default function OrganizerResults({ programs }) {
             onClick={toggleTotalPointsPause}>
             {pauseSaving ? 'Saving…' : pointsVisibility.total_team_points_paused ? 'Resume live overall totals' : 'Pause overall totals'}
           </button>
+          {pointsVisibility.total_team_points_paused && <button className="secondary" disabled={visibilityLoading || pauseSaving}
+            onClick={refreshPausedTotals}>
+            {pauseSaving ? 'Saving…' : 'Refresh paused totals from published results'}
+          </button>}
           <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving || pointsVisibility.total_team_points_paused}
             checked={pointsVisibility.show_total_team_points}
             onChange={event => setPointsVisibility(current => ({ ...current, show_total_team_points: event.target.checked }))} /> Show overall team point totals</label>

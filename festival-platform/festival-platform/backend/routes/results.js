@@ -27,7 +27,8 @@ function readPausedStandings() {
   if (!saved) return null;
   try {
     const value = JSON.parse(saved.setting_value);
-    return Object.fromEntries(TEAMS.map(team => [team.key, Math.max(0, Number(value[team.key]) || 0)]));
+    if (!value || typeof value !== 'object' || TEAMS.some(team => !Number.isFinite(Number(value[team.key])) || Number(value[team.key]) < 0)) return null;
+    return Object.fromEntries(TEAMS.map(team => [team.key, Number(value[team.key])]));
   } catch { return null; }
 }
 
@@ -72,6 +73,28 @@ function computeRankings(programId, withIdentity = false) {
     r.rank = i > 0 && judged[i - 1].average_score === r.average_score ? judged[i - 1].rank : i + 1;
   });
   return { ranked: judged, pending: unjudged };
+}
+
+// Recalculate the exact current total from published results and organizer-assigned points.
+// This is read-only and is also the source used to create a pause snapshot.
+function calculateCurrentTeamStandings() {
+  const programs = db.prepare('SELECT * FROM programs WHERE results_published = 1').all();
+  const standings = Object.fromEntries(TEAMS.map(team => [team, 0]));
+  for (const program of programs) {
+    const { ranked } = computeRankings(program.id, true);
+    const pointsByPlace = {
+      1: program.first_place_points,
+      2: program.second_place_points,
+      3: program.third_place_points
+    };
+    for (const result of ranked) {
+      const points = pointsByPlace[result.rank];
+      if (result.rank <= 3 && points != null && standings[result.team_name] !== undefined) {
+        standings[result.team_name] += points;
+      }
+    }
+  }
+  return standings;
 }
 
 // ---- Public, published-only feed for the home page / leaderboard ----
@@ -149,7 +172,7 @@ router.put('/points-pause', requireRole('organizer'), (req, res) => {
   const { paused } = req.body || {};
   if (typeof paused !== 'boolean') return res.status(400).json({ error: 'Choose whether overall team totals should be paused.' });
 
-  const current = buildPublicFeed(true).standings || Object.fromEntries(TEAMS.map(team => [team.key, 0]));
+  const current = paused ? calculateCurrentTeamStandings() : null;
   const update = db.prepare(`INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, datetime('now'))
     ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`);
   const save = db.transaction(() => {
