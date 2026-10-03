@@ -143,7 +143,7 @@ router.post('/student-lookup', (req, res) => {
   }
 
   const registrations = db.prepare(`SELECT r.id AS registration_id, r.participant_id, r.code_letter,
-      r.status, r.team_name, p.id AS program_id, p.name AS program_name, p.category,
+      r.status, r.student_name, r.is_team, r.team_members, r.team_name, p.id AS program_id, p.name AS program_name, p.category,
       p.number, p.type, p.results_published
     FROM registrations r JOIN programs p ON p.id = r.program_id
     WHERE r.student_id = ? ORDER BY p.category, p.number, p.name`).all(studentId);
@@ -166,6 +166,9 @@ router.post('/student-lookup', (req, res) => {
       code_letter: String(registration.code_letter).startsWith('PENDING-') ? null : registration.code_letter,
       code_assigned: !String(registration.code_letter).startsWith('PENDING-'),
       registration_status: registration.status,
+      student_name: registration.student_name,
+      is_team: !!registration.is_team,
+      team_members: registration.team_members,
       team_name: registration.team_name,
       program: {
         id: registration.program_id,

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
+import { downloadResultsPoster } from '../resultsPoster.js';
 
 const places = { 1: '1st Place', 2: '2nd Place', 3: '3rd Place' };
 const statusLabels = {
@@ -21,6 +22,8 @@ export default function MyResults() {
   const [alertMessage, setAlertMessage] = useState('');
   const [downloadingCertificate, setDownloadingCertificate] = useState(null);
   const [certificateError, setCertificateError] = useState(null);
+  const [downloadingPoster, setDownloadingPoster] = useState(null);
+  const [posterError, setPosterError] = useState(null);
   const knownResults = useRef(new Set());
 
   useEffect(() => {
@@ -73,6 +76,28 @@ export default function MyResults() {
       setCertificateError({ registrationId: item.registration_id, message: err.message || 'Could not generate your certificate.' });
     } finally {
       setDownloadingCertificate(null);
+    }
+  };
+
+  const downloadPoster = async (item) => {
+    setDownloadingPoster(item.registration_id);
+    setPosterError(null);
+    try {
+      await downloadResultsPoster({
+        program: item.program,
+        winners: [{
+          rank: item.result.rank,
+          student_name: item.student_name,
+          team_name: item.team_name,
+          team_members: item.team_members,
+          is_team: item.is_team,
+          code_letter: item.code_letter
+        }]
+      });
+    } catch (err) {
+      setPosterError({ registrationId: item.registration_id, message: err.message || 'Could not generate your poster.' });
+    } finally {
+      setDownloadingPoster(null);
     }
   };
 
@@ -143,6 +168,11 @@ export default function MyResults() {
                 onClick={() => downloadCertificate(item)}>
                 {downloadingCertificate === item.registration_id ? 'Generating certificate…' : 'Download my certificate'}
               </button>}
+              {item.results_published && item.result && item.result.rank <= 3 && <button type="button" className="secondary"
+                disabled={downloadingPoster != null} onClick={() => downloadPoster(item)}>
+                {downloadingPoster === item.registration_id ? 'Generating poster…' : 'Download my results poster'}
+              </button>}
+              {posterError?.registrationId === item.registration_id && <p className="error" role="alert">{posterError.message}</p>}
               {certificateError?.registrationId === item.registration_id && <p className="error" role="alert">{certificateError.message}</p>}
             </article>
           ))}
