@@ -47,17 +47,21 @@ export default function ResultsSection({ limit, full = false, projector = false 
     };
     socket.on('results:published', onPublished);
     socket.on('results:unpublished', load);
+    socket.on('results:visibility', load);
 
     return () => {
       clearInterval(poll);
       socket.off('results:published', onPublished);
       socket.off('results:unpublished', load);
+      socket.off('results:visibility', load);
       timers.current.forEach(clearTimeout);
     };
   }, [load]);
 
   const published = feed?.published ?? [];
   const shown = limit ? published.slice(0, limit) : published;
+  const showTotalTeamPoints = feed?.visibility?.show_total_team_points !== false;
+  const showProgramTeamPoints = feed?.visibility?.show_program_team_points !== false;
   const standings = feed?.standings ?? Object.fromEntries(TEAMS.map(t => [t.key, 0]));
   const [a, b] = TEAMS.map(t => standings[t.key] ?? 0);
   const total = a + b;
@@ -74,10 +78,11 @@ export default function ResultsSection({ limit, full = false, projector = false 
       </div>
       <p className="results-sub">
         Results appear here the moment a judge publishes them.
-        {feed?.has_points ? ' Team points are assigned by the organizer for each program.' : ' Team points will appear after the organizer assigns them.'}
+        {!showProgramTeamPoints ? ' Per-program team points are hidden by the organizers.'
+          : feed?.has_points ? ' Team points are assigned by the organizer for each program.' : ' Team points will appear after the organizer assigns them.'}
       </p>
 
-      <div className="team-battle">
+      {showTotalTeamPoints ? <div className="team-battle">
         {TEAMS.map((t, i) => (
           <div key={t.key} className={`team-side ${i === 1 ? 'right' : ''} ${leader?.key === t.key ? 'is-leading' : ''}`} style={{ '--team': t.color }}>
             <span className="team-side-label">{t.label}</span>
@@ -95,7 +100,7 @@ export default function ResultsSection({ limit, full = false, projector = false 
             : leader ? <><strong style={{ color: leader.color }}>{leader.key}</strong> leads by {gap} {gap === 1 ? 'point' : 'points'}</>
             : 'Both teams are level'}
         </p>
-      </div>
+      </div> : <div className="team-points-hidden" role="status">Overall team point totals are hidden by the organizers.</div>}
 
       {published.length === 0 ? (
         <div className="results-empty">
@@ -125,7 +130,7 @@ export default function ResultsSection({ limit, full = false, projector = false 
                       <div className="podium-who">
                         <strong>{r.name || `Participant ${r.code_letter}`}</strong>
                         {r.members && <small>with {r.members}</small>}
-                        {r.team_points != null && <small>{r.team_points} team {r.team_points === 1 ? 'point' : 'points'}</small>}
+                        {showProgramTeamPoints && r.team_points != null && <small>{r.team_points} team {r.team_points === 1 ? 'point' : 'points'}</small>}
                         <TeamBadge name={r.team_name} />
                       </div>
                       <span className="podium-score">{r.average_score}</span>

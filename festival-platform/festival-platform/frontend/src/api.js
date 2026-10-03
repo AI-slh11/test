@@ -146,6 +146,8 @@ export const api = {
   deleteRegistration: (id) => request(`/registrations/${id}`, { method: 'DELETE' }),
 
   publicFeed: () => request('/results/public/feed'),
+  pointsVisibility: () => request('/results/visibility'),
+  setPointsVisibility: (visibility) => request('/results/visibility', { method: 'PUT', body: JSON.stringify(visibility) }),
   publicSchedule: () => request('/schedule'),
   organizerSchedule: () => request('/schedule'),
   createScheduleItem: (payload) => request('/schedule', { method: 'POST', body: JSON.stringify(payload) }),

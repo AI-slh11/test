@@ -138,6 +138,17 @@ db.exec(`CREATE TABLE IF NOT EXISTS schedule_items (
 if (!hasCol('schedule_items', 'category')) db.exec('ALTER TABLE schedule_items ADD COLUMN category TEXT');
 db.exec('CREATE INDEX IF NOT EXISTS idx_schedule_public_order ON schedule_items(published, schedule_date, start_time, sort_order, id)');
 
+// Public team-point visibility is stored separately from points and results.
+// Defaults preserve the current public display on upgraded installations.
+db.exec(`CREATE TABLE IF NOT EXISTS app_settings (
+  setting_key TEXT PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at TEXT DEFAULT (datetime('now'))
+)`);
+const insertDefaultSetting = db.prepare('INSERT OR IGNORE INTO app_settings (setting_key, setting_value) VALUES (?, ?)');
+insertDefaultSetting.run('show_total_team_points', 'true');
+insertDefaultSetting.run('show_program_team_points', 'true');
+
 // Hidden admin accounts (separate from organizer/judge users). Passwords are stored as scrypt hashes.
 db.exec(`CREATE TABLE IF NOT EXISTS admins (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -11,6 +11,16 @@ const { recordAudit } = require('../audit');
 const { activeScores, assignedJudgeIds, registrationIsFullyScored } = require('../registrationJudges');
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 
+function getPointsVisibility() {
+  const rows = db.prepare(`SELECT setting_key, setting_value FROM app_settings
+    WHERE setting_key IN ('show_total_team_points', 'show_program_team_points')`).all();
+  const values = Object.fromEntries(rows.map(row => [row.setting_key, row.setting_value === 'true']));
+  return {
+    show_total_team_points: values.show_total_team_points ?? true,
+    show_program_team_points: values.show_program_team_points ?? true
+  };
+}
+
 // Ranked results for one program. Judge-by-judge details are only returned by
 // the organizer-only review endpoint below.
 function computeRankings(programId, withIdentity = false) {
@@ -57,6 +67,7 @@ function computeRankings(programId, withIdentity = false) {
 // ---- Public, published-only feed for the home page / leaderboard ----
 // Winners (top 3) are shown by name once published; everyone else by code letter only.
 function buildPublicFeed() {
+  const visibility = getPointsVisibility();
   const programs = db.prepare(
     'SELECT * FROM programs WHERE results_published = 1 ORDER BY published_at DESC, id DESC'
   ).all();
@@ -74,13 +85,14 @@ function buildPublicFeed() {
       }
     });
     return {
-      program: { id: p.id, name: p.name, code: p.code, type: p.type, category: p.category, number: p.number, team_points: teamPoints },
+      program: { id: p.id, name: p.name, code: p.code, type: p.type, category: p.category, number: p.number,
+        team_points: visibility.show_program_team_points ? teamPoints : null },
       published_at: p.published_at,
       results: ranked.map(r => ({
         rank: r.rank,
         code_letter: r.code_letter,
         team_name: r.team_name,
-        team_points: teamPoints[r.rank] ?? null,
+        team_points: visibility.show_program_team_points ? (teamPoints[r.rank] ?? null) : null,
         average_score: r.average_score,
         is_group: r.is_team,
         name: r.rank <= 3 ? r.student_name : null,
@@ -89,8 +101,35 @@ function buildPublicFeed() {
     };
   });
 
-  return { teams: TEAMS, has_points: hasPointAssignments, standings, published };
+  return {
+    teams: TEAMS,
+    has_points: hasPointAssignments,
+    visibility,
+    standings: visibility.show_total_team_points ? standings : null,
+    published
+  };
 }
+
+// Organizers control only public display. The saved team point assignments are not changed.
+router.get('/visibility', requireRole('organizer'), (req, res) => res.json(getPointsVisibility()));
+
+router.put('/visibility', requireRole('organizer'), (req, res) => {
+  const { show_total_team_points, show_program_team_points } = req.body || {};
+  if (typeof show_total_team_points !== 'boolean' || typeof show_program_team_points !== 'boolean') {
+    return res.status(400).json({ error: 'Choose whether to show overall team totals and per-program team points.' });
+  }
+  const update = db.prepare(`INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`);
+  const save = db.transaction(() => {
+    update.run('show_total_team_points', String(show_total_team_points));
+    update.run('show_program_team_points', String(show_program_team_points));
+  });
+  save();
+  const visibility = getPointsVisibility();
+  recordAudit(req, 'update', 'public_points_visibility', 'global', visibility);
+  req.app.get('io').emit('results:visibility', visibility);
+  res.json(visibility);
+});
 
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
 router.get('/public/feed', (req, res) => res.json(buildPublicFeed()));

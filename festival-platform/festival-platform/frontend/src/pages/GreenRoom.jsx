@@ -4,6 +4,8 @@ import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
 
+const isGroupProgram = name => /\b(qawwali|group\s+song|quiz|nasheeda?)\b/i.test(String(name || ''));
+
 export default function GreenRoom() {
   const [programs, setPrograms] = useState([]);
   const [judges, setJudges] = useState([]);
@@ -31,6 +33,7 @@ export default function GreenRoom() {
   useEffect(() => { loadRegistrations(activeProgram); }, [activeProgram]);
 
   const program = programs.find(p => String(p.id) === String(activeProgram));
+  const requiredGroupProgram = isGroupProgram(program?.name);
   const allCodeLetters = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))];
   const assignmentConflicts = program ? form.judge_ids.flatMap(judgeId => {
     const judge = judges.find(item => String(item.id) === String(judgeId));
@@ -49,8 +52,12 @@ export default function GreenRoom() {
       setError(assignmentConflicts.join(' '));
       return;
     }
+    if (requiredGroupProgram && !form.team_members.trim()) {
+      setError(`${program.name} is a group program. Enter the other performers' names.`);
+      return;
+    }
     try {
-      await api.register({ ...form, program_id: activeProgram, source: 'onsite' });
+      await api.register({ ...form, is_team: form.is_team || requiredGroupProgram, program_id: activeProgram, source: 'onsite' });
       setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
       loadRegistrations(activeProgram);
       loadPrograms();
@@ -166,12 +173,12 @@ export default function GreenRoom() {
                   <option value="">Select team...</option>
                   {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label} — {t.key}</option>)}
                 </select>
-                <label className="checkbox">
+                {requiredGroupProgram ? <p className="muted small">This is a group program; enter every other performer below.</p> : <label className="checkbox">
                   <input type="checkbox" checked={form.is_team} onChange={e => setForm({ ...form, is_team: e.target.checked })} />
                   Group entry
-                </label>
-                {form.is_team && (
-                  <input placeholder="Team members, comma separated" value={form.team_members}
+                </label>}
+                {(form.is_team || requiredGroupProgram) && (
+                  <input placeholder="Other performers, comma separated" value={form.team_members}
                     onChange={e => setForm({ ...form, team_members: e.target.value })} />
                 )}
                 {program.type === 'writing' && (
@@ -228,10 +235,10 @@ export default function GreenRoom() {
                         {TEAMS.map(t => <option key={t.key} value={t.key}>{t.key}</option>)}
                       </select>
                       <label className="checkbox">
-                        <input type="checkbox" checked={editing.values.is_team} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, is_team: e.target.checked } }))} />
+                        <input type="checkbox" checked={editing.values.is_team || requiredGroupProgram} disabled={requiredGroupProgram} onChange={e => setEditing(current => ({ ...current, values: { ...current.values, is_team: e.target.checked } }))} />
                         Group entry
                       </label>
-                      {editing.values.is_team && <input aria-label="Group members" placeholder="Team members" value={editing.values.team_members}
+                      {(editing.values.is_team || requiredGroupProgram) && <input aria-label="Group members" placeholder="Team members" value={editing.values.team_members}
                         onChange={e => setEditing(current => ({ ...current, values: { ...current.values, team_members: e.target.value } }))} />}
                     </td>
                     <td>—</td>

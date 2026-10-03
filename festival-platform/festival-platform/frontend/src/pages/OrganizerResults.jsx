@@ -22,6 +22,14 @@ export default function OrganizerResults({ programs }) {
   const [downloadingPoster, setDownloadingPoster] = useState(false);
   const [posterTemplate, setPosterTemplate] = useState('emerald');
   const [posterFont, setPosterFont] = useState('poppins');
+  const [pointsVisibility, setPointsVisibility] = useState({ show_total_team_points: true, show_program_team_points: true });
+  const [visibilityLoading, setVisibilityLoading] = useState(true);
+  const [visibilitySaving, setVisibilitySaving] = useState(false);
+
+  useEffect(() => {
+    api.pointsVisibility().then(setPointsVisibility).catch(e => setError(e.message || 'Could not load public points settings.'))
+      .finally(() => setVisibilityLoading(false));
+  }, []);
 
   const loadReview = async (id = programId) => {
     if (!id) { setReview(null); setTeamPoints({ 1: '', 2: '', 3: '' }); return; }
@@ -116,6 +124,21 @@ export default function OrganizerResults({ programs }) {
     }
   };
 
+  const savePointsVisibility = async () => {
+    setVisibilitySaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await api.setPointsVisibility(pointsVisibility);
+      setPointsVisibility(saved);
+      setMessage('Public team-point display updated. Saved results and point values are unchanged.');
+    } catch (e) {
+      setError(e.message || 'Could not update public points visibility.');
+    } finally {
+      setVisibilitySaving(false);
+    }
+  };
+
   const scoreFor = (participant, judgeId) => participant.scores.find(score => score.judge_id === judgeId);
 
   const saveScore = async (e) => {
@@ -184,6 +207,19 @@ export default function OrganizerResults({ programs }) {
         {loading && <p className="muted" role="status">Loading scorecards…</p>}
         {error && <p className="error" role="alert">{error}</p>}
         {message && <p className="success" role="status">{message}</p>}
+        <div className="card results-visibility-card">
+          <h3>Public team-point visibility</h3>
+          <p className="muted">Published results stay visible. These controls only hide or show team points; registrations, places, scores, and saved point values are preserved.</p>
+          <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving}
+            checked={pointsVisibility.show_total_team_points}
+            onChange={event => setPointsVisibility(current => ({ ...current, show_total_team_points: event.target.checked }))} /> Show overall team point totals</label>
+          <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving}
+            checked={pointsVisibility.show_program_team_points}
+            onChange={event => setPointsVisibility(current => ({ ...current, show_program_team_points: event.target.checked }))} /> Show team points on each program’s published results</label>
+          <button className="secondary" disabled={visibilityLoading || visibilitySaving} onClick={savePointsVisibility}>
+            {visibilityLoading ? 'Loading settings…' : visibilitySaving ? 'Saving…' : 'Save public display settings'}
+          </button>
+        </div>
       </div>
 
       {review && !loading && (

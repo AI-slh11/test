@@ -9,6 +9,9 @@ const { assignedJudgeIds, updateJudgingStatus } = require('../registrationJudges
 
 // 4 digits + 2-3 letters + 3 digits, e.g. 2023CSE001
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
+const isGroupProgramName = name => /\b(qawwali|group\s+song|quiz|nasheeda?)\b/i.test(String(name || ''));
+const INDIVIDUAL_STAGE_PROGRAM_FILTER = `lower(p.name) NOT LIKE '%qawwali%' AND lower(p.name) NOT LIKE '%group song%'
+  AND lower(p.name) NOT LIKE '%quiz%' AND lower(p.name) NOT LIKE '%nasheed%'`;
 
 const CODE_LETTER_RE = /^[A-Z]{1,2}$/;
 const isPendingCode = (value) => String(value || '').startsWith('PENDING-');
@@ -41,7 +44,7 @@ router.get('/individual-stage-count/:studentId', (req, res) => {
   if (!STUDENT_ID_RE.test(studentId)) return res.status(400).json({ error: 'Enter a valid Student ID first' });
   const count = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count
     FROM registrations r JOIN programs p ON p.id = r.program_id
-    WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage'`).get(studentId).count;
+    WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage' AND ${INDIVIDUAL_STAGE_PROGRAM_FILTER}`).get(studentId).count;
   res.json({ count, limit: 5, remaining: Math.max(0, 5 - count) });
 });
 
@@ -73,11 +76,19 @@ router.post('/', optionalAuth, (req, res) => {
   if (!STUDENT_ID_RE.test(studentId)) {
     return res.status(400).json({ error: 'Invalid Student ID. Format: 4 digits, 2-3 letters, 3 digits (e.g. 2023CSE001)' });
   }
+  const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(program_id);
+  if (!program) return res.status(404).json({ error: 'Program not found' });
+  if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before registering students or changing its panel' });
+  const requiredGroupProgram = isGroupProgramName(program.name);
+  const groupEntry = !!is_team || requiredGroupProgram;
   let teamRoster = [];
-  if (is_team) {
+  if (groupEntry) {
     if (rawTeamRoster !== undefined && !Array.isArray(rawTeamRoster)) return res.status(400).json({ error: 'Group members must be a list of students' });
     const submittedRoster = Array.isArray(rawTeamRoster) ? rawTeamRoster : [];
     if (submittedRoster.length > 24) return res.status(400).json({ error: 'A group can include up to 25 students including the registrant' });
+    if (requiredGroupProgram && submittedRoster.length < 1 && !String(team_members || '').trim()) {
+      return res.status(400).json({ error: `${program.name} is a group program. Add at least one other performer.` });
+    }
     const seenIds = new Set([studentId]);
     for (const member of submittedRoster) {
       const memberId = String(member?.student_id || '').trim().toUpperCase();
@@ -91,10 +102,6 @@ router.post('/', optionalAuth, (req, res) => {
       teamRoster.push({ student_name: memberName, student_id: memberId, found: !!existingStudent });
     }
   }
-  const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(program_id);
-  if (!program) return res.status(404).json({ error: 'Program not found' });
-  if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before registering students or changing its panel' });
-
   const judgeIds = [...new Set(requestedJudges.map(Number))];
   for (const judgeId of judgeIds) {
     const conflict = assignmentConflict(program_id, judgeId);
@@ -103,10 +110,10 @@ router.post('/', optionalAuth, (req, res) => {
 
   const duplicate = db.prepare('SELECT id FROM registrations WHERE program_id = ? AND student_id = ?').get(program_id, studentId);
   if (duplicate) return res.status(409).json({ error: 'This Student ID is already registered for this program' });
-  if (!is_team && program.type === 'stage') {
+  if (!groupEntry && program.type === 'stage') {
     const stageCount = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count
       FROM registrations r JOIN programs p ON p.id = r.program_id
-      WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage'`).get(studentId).count;
+      WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage' AND ${INDIVIDUAL_STAGE_PROGRAM_FILTER}`).get(studentId).count;
     if (stageCount >= 5) {
       return res.status(409).json({ error: 'Each student may register for a maximum of 5 Stage programs individually. This Student ID has already reached that limit. Group entries do not count toward the individual limit.' });
     }
@@ -123,7 +130,7 @@ router.post('/', optionalAuth, (req, res) => {
     INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name, team_leader_name, team_leader_id, team_roster)
     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     `).run(
-      program_id, student_name.trim(), studentId, is_team ? 1 : 0, teamRoster.length ? teamRoster.map(member => member.student_name).join(', ') : (team_members || null),
+      program_id, student_name.trim(), studentId, groupEntry ? 1 : 0, teamRoster.length ? teamRoster.map(member => member.student_name).join(', ') : (team_members || null),
       language || program.language || null, pendingCode, pendingParticipantId, source === 'onsite' ? 'onsite' : 'online', team_name,
       team_leader_name ? String(team_leader_name).trim().slice(0, 120) : null,
       team_leader_id ? String(team_leader_id).trim().toUpperCase().slice(0, 12) : null,
@@ -187,13 +194,20 @@ router.post('/bulk', requireOrganizerOrControlAdmin, (req, res) => {
     const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
     if (!program || program.results_published) { results.push({ row: index + 1, error: !program ? 'Program not found' : 'Program results are published' }); continue; }
     if (db.prepare('SELECT 1 FROM registrations WHERE program_id = ? AND student_id = ?').get(programId, studentId)) { results.push({ row: index + 1, error: 'Duplicate Student ID for this program' }); continue; }
+    const groupEntry = !!row.is_team || isGroupProgramName(program.name);
+    if (isGroupProgramName(program.name) && !String(row.team_members || '').trim()) { results.push({ row: index + 1, error: `${program.name} is a group program; add the other performers' names` }); continue; }
+    if (!groupEntry && program.type === 'stage') {
+      const stageCount = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count FROM registrations r JOIN programs p ON p.id = r.program_id
+        WHERE r.student_id = ? AND r.is_team = 0 AND p.type = 'stage' AND ${INDIVIDUAL_STAGE_PROGRAM_FILTER}`).get(studentId).count;
+      if (stageCount >= 5) { results.push({ row: index + 1, error: 'Student has reached the limit of 5 individual Stage programs' }); continue; }
+    }
     const count = db.prepare('SELECT COUNT(*) c FROM registrations WHERE program_id = ?').get(programId).c;
     if (program.quota && count >= program.quota) { results.push({ row: index + 1, error: 'Program quota reached' }); continue; }
     const pendingCode = `PENDING-${require('crypto').randomBytes(8).toString('hex').toUpperCase()}`;
     const pendingParticipantId = `FEST-${program.code}-${pendingCode}`;
     try {
       const info = db.prepare(`INSERT INTO registrations (program_id, student_name, student_id, is_team, team_members, language, code_letter, participant_id, source, team_name)
-        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(programId, String(row.student_name).trim(), studentId, row.is_team ? 1 : 0,
+        VALUES (?,?,?,?,?,?,?,?,?,?)`).run(programId, String(row.student_name).trim(), studentId, groupEntry ? 1 : 0,
         row.team_members || null, row.language || program.language || null, pendingCode, pendingParticipantId, 'onsite', row.team_name);
       results.push({ row: index + 1, registration_id: info.lastInsertRowid, code_assignment_pending: true });
       recordAudit(req, 'bulk_register', 'registration', info.lastInsertRowid, { program_id: programId, code_assignment_pending: true });
@@ -353,7 +367,7 @@ router.patch('/:id/status', requireOrganizerOrControlAdmin, (req, res) => {
 router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   const cur = db.prepare('SELECT * FROM registrations WHERE id = ?').get(req.params.id);
   if (!cur) return res.status(404).json({ error: 'Registration not found' });
-  const program = db.prepare('SELECT results_published FROM programs WHERE id = ?').get(cur.program_id);
+  const program = db.prepare('SELECT results_published, name, type FROM programs WHERE id = ?').get(cur.program_id);
   if (program?.results_published) return res.status(409).json({ error: 'Unpublish this program before editing registrations' });
   const b = req.body;
   if (b.student_name !== undefined && (typeof b.student_name !== 'string' || !b.student_name.trim())) {
@@ -368,9 +382,15 @@ router.patch('/:id', requireOrganizerOrControlAdmin, (req, res) => {
   }
   // empty string = "leave as is" (older registrations may have no team yet)
   if (b.team_name && !TEAMS.includes(b.team_name)) return res.status(400).json({ error: 'Invalid team' });
+  const nextIsTeam = isGroupProgramName(program?.name) || ('is_team' in b ? !!b.is_team : !!cur.is_team);
+  if (!nextIsTeam && program?.type === 'stage') {
+    const stageCount = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count FROM registrations r JOIN programs p ON p.id = r.program_id
+      WHERE r.student_id = ? AND r.id != ? AND r.is_team = 0 AND p.type = 'stage' AND ${INDIVIDUAL_STAGE_PROGRAM_FILTER}`).get(studentId, cur.id).count;
+    if (stageCount >= 5) return res.status(409).json({ error: 'This student is already registered for 5 individual Stage programs.' });
+  }
   db.prepare('UPDATE registrations SET student_name=?, student_id=?, is_team=?, team_members=?, language=?, team_name=? WHERE id=?').run(
     b.student_name !== undefined ? b.student_name.trim() : cur.student_name, studentId,
-    'is_team' in b ? (b.is_team ? 1 : 0) : cur.is_team,
+    nextIsTeam ? 1 : 0,
     'team_members' in b ? (b.team_members || null) : cur.team_members,
     'language' in b ? (b.language || null) : cur.language, b.team_name || cur.team_name, cur.id);
   recordAudit(req, 'edit', 'registration', cur.id, { student_name: b.student_name ?? cur.student_name, student_id: studentId });
