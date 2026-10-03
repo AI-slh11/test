@@ -60,7 +60,8 @@ export default function ResultsSection({ limit, full = false, projector = false 
 
   const published = feed?.published ?? [];
   const shown = limit ? published.slice(0, limit) : published;
-  const showTotalTeamPoints = feed?.visibility?.show_total_team_points !== false;
+  const showTotalTeamPoints = feed?.visibility?.total_team_points_paused === true
+    || feed?.visibility?.show_total_team_points !== false;
   const showProgramTeamPoints = feed?.visibility?.show_program_team_points !== false;
   const standings = feed?.standings ?? Object.fromEntries(TEAMS.map(t => [t.key, 0]));
   const [a, b] = TEAMS.map(t => standings[t.key] ?? 0);
@@ -78,6 +79,7 @@ export default function ResultsSection({ limit, full = false, projector = false 
       </div>
       <p className="results-sub">
         Results appear here the moment a judge publishes them.
+        {feed?.visibility?.total_team_points_paused ? ' Overall team totals are paused at the organizer’s saved total.' : ''}
         {!showProgramTeamPoints ? ' Per-program team points are hidden by the organizers.'
           : feed?.has_points ? ' Team points are assigned by the organizer for each program.' : ' Team points will appear after the organizer assigns them.'}
       </p>

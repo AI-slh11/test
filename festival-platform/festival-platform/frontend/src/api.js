@@ -148,6 +148,7 @@ export const api = {
   publicFeed: () => request('/results/public/feed'),
   pointsVisibility: () => request('/results/visibility'),
   setPointsVisibility: (visibility) => request('/results/visibility', { method: 'PUT', body: JSON.stringify(visibility) }),
+  setTotalPointsPaused: (paused) => request('/results/points-pause', { method: 'PUT', body: JSON.stringify({ paused }) }),
   publicSchedule: () => request('/schedule'),
   organizerSchedule: () => request('/schedule'),
   createScheduleItem: (payload) => request('/schedule', { method: 'POST', body: JSON.stringify(payload) }),

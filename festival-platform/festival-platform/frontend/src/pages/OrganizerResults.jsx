@@ -22,9 +22,10 @@ export default function OrganizerResults({ programs }) {
   const [downloadingPoster, setDownloadingPoster] = useState(false);
   const [posterTemplate, setPosterTemplate] = useState('emerald');
   const [posterFont, setPosterFont] = useState('poppins');
-  const [pointsVisibility, setPointsVisibility] = useState({ show_total_team_points: true, show_program_team_points: true });
+  const [pointsVisibility, setPointsVisibility] = useState({ show_total_team_points: true, show_program_team_points: true, total_team_points_paused: false });
   const [visibilityLoading, setVisibilityLoading] = useState(true);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [pauseSaving, setPauseSaving] = useState(false);
 
   useEffect(() => {
     api.pointsVisibility().then(setPointsVisibility).catch(e => setError(e.message || 'Could not load public points settings.'))
@@ -139,6 +140,24 @@ export default function OrganizerResults({ programs }) {
     }
   };
 
+  const toggleTotalPointsPause = async () => {
+    const paused = !pointsVisibility.total_team_points_paused;
+    setPauseSaving(true);
+    setError('');
+    setMessage('');
+    try {
+      const saved = await api.setTotalPointsPaused(paused);
+      setPointsVisibility(current => ({ ...current, ...saved }));
+      setMessage(paused
+        ? 'Overall team totals are paused and remain visible. New published results will not change the frozen totals.'
+        : 'Overall team totals are live again and will include all currently published results.');
+    } catch (e) {
+      setError(e.message || 'Could not update the overall team totals pause.');
+    } finally {
+      setPauseSaving(false);
+    }
+  };
+
   const scoreFor = (participant, judgeId) => participant.scores.find(score => score.judge_id === judgeId);
 
   const saveScore = async (e) => {
@@ -209,8 +228,13 @@ export default function OrganizerResults({ programs }) {
         {message && <p className="success" role="status">{message}</p>}
         <div className="card results-visibility-card">
           <h3>Public team-point visibility</h3>
-          <p className="muted">Published results stay visible. These controls only hide or show team points; registrations, places, scores, and saved point values are preserved.</p>
-          <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving}
+          <p className="muted">Pausing freezes the current overall totals while published program results remain visible. Resuming recalculates totals from all published results. No registrations, places, scores, or assigned point values are changed.</p>
+          <p className="muted" role="status">Overall totals are {pointsVisibility.total_team_points_paused ? 'paused and frozen' : 'live'}.</p>
+          <button className={pointsVisibility.total_team_points_paused ? '' : 'secondary'} disabled={visibilityLoading || pauseSaving}
+            onClick={toggleTotalPointsPause}>
+            {pauseSaving ? 'Saving…' : pointsVisibility.total_team_points_paused ? 'Resume live overall totals' : 'Pause overall totals'}
+          </button>
+          <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving || pointsVisibility.total_team_points_paused}
             checked={pointsVisibility.show_total_team_points}
             onChange={event => setPointsVisibility(current => ({ ...current, show_total_team_points: event.target.checked }))} /> Show overall team point totals</label>
           <label className="checkbox"><input type="checkbox" disabled={visibilityLoading || visibilitySaving}

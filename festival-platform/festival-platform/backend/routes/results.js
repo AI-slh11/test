@@ -13,12 +13,22 @@ const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 
 function getPointsVisibility() {
   const rows = db.prepare(`SELECT setting_key, setting_value FROM app_settings
-    WHERE setting_key IN ('show_total_team_points', 'show_program_team_points')`).all();
+    WHERE setting_key IN ('show_total_team_points', 'show_program_team_points', 'total_team_points_paused')`).all();
   const values = Object.fromEntries(rows.map(row => [row.setting_key, row.setting_value === 'true']));
   return {
     show_total_team_points: values.show_total_team_points ?? true,
-    show_program_team_points: values.show_program_team_points ?? true
+    show_program_team_points: values.show_program_team_points ?? true,
+    total_team_points_paused: values.total_team_points_paused ?? false
   };
+}
+
+function readPausedStandings() {
+  const saved = db.prepare("SELECT setting_value FROM app_settings WHERE setting_key = 'paused_team_standings'").get();
+  if (!saved) return null;
+  try {
+    const value = JSON.parse(saved.setting_value);
+    return Object.fromEntries(TEAMS.map(team => [team.key, Math.max(0, Number(value[team.key]) || 0)]));
+  } catch { return null; }
 }
 
 // Ranked results for one program. Judge-by-judge details are only returned by
@@ -66,7 +76,7 @@ function computeRankings(programId, withIdentity = false) {
 
 // ---- Public, published-only feed for the home page / leaderboard ----
 // Winners (top 3) are shown by name once published; everyone else by code letter only.
-function buildPublicFeed() {
+function buildPublicFeed(includeHiddenStandings = false) {
   const visibility = getPointsVisibility();
   const programs = db.prepare(
     'SELECT * FROM programs WHERE results_published = 1 ORDER BY published_at DESC, id DESC'
@@ -101,11 +111,13 @@ function buildPublicFeed() {
     };
   });
 
+  const pausedStandings = visibility.total_team_points_paused ? readPausedStandings() : null;
   return {
     teams: TEAMS,
     has_points: hasPointAssignments,
     visibility,
-    standings: visibility.show_total_team_points ? standings : null,
+    standings: visibility.show_total_team_points || visibility.total_team_points_paused || includeHiddenStandings
+      ? (pausedStandings || standings) : null,
     published
   };
 }
@@ -118,10 +130,11 @@ router.put('/visibility', requireRole('organizer'), (req, res) => {
   if (typeof show_total_team_points !== 'boolean' || typeof show_program_team_points !== 'boolean') {
     return res.status(400).json({ error: 'Choose whether to show overall team totals and per-program team points.' });
   }
+  const keepPausedTotalsVisible = getPointsVisibility().total_team_points_paused;
   const update = db.prepare(`INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, datetime('now'))
     ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`);
   const save = db.transaction(() => {
-    update.run('show_total_team_points', String(show_total_team_points));
+    update.run('show_total_team_points', String(keepPausedTotalsVisible || show_total_team_points));
     update.run('show_program_team_points', String(show_program_team_points));
   });
   save();
@@ -129,6 +142,26 @@ router.put('/visibility', requireRole('organizer'), (req, res) => {
   recordAudit(req, 'update', 'public_points_visibility', 'global', visibility);
   req.app.get('io').emit('results:visibility', visibility);
   res.json(visibility);
+});
+
+// Freeze the current public totals without hiding them or changing any points/results.
+router.put('/points-pause', requireRole('organizer'), (req, res) => {
+  const { paused } = req.body || {};
+  if (typeof paused !== 'boolean') return res.status(400).json({ error: 'Choose whether overall team totals should be paused.' });
+
+  const current = buildPublicFeed(true).standings || Object.fromEntries(TEAMS.map(team => [team.key, 0]));
+  const update = db.prepare(`INSERT INTO app_settings (setting_key, setting_value, updated_at) VALUES (?, ?, datetime('now'))
+    ON CONFLICT(setting_key) DO UPDATE SET setting_value = excluded.setting_value, updated_at = excluded.updated_at`);
+  const save = db.transaction(() => {
+    if (paused) update.run('paused_team_standings', JSON.stringify(current));
+    if (paused) update.run('show_total_team_points', 'true');
+    update.run('total_team_points_paused', String(paused));
+  });
+  save();
+  const visibility = getPointsVisibility();
+  recordAudit(req, paused ? 'pause' : 'resume', 'overall_team_points', 'global', { paused, standings: paused ? current : undefined });
+  req.app.get('io').emit('results:visibility', visibility);
+  res.json({ ...visibility, standings: paused ? current : null });
 });
 
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
