@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
-import { downloadResultsPoster } from '../resultsPoster.js';
+import { downloadResultsPoster, POSTER_FONTS, POSTER_TEMPLATES } from '../resultsPoster.js';
 
 const places = { 1: '1st Place', 2: '2nd Place', 3: '3rd Place' };
 const statusLabels = {
@@ -24,6 +24,8 @@ export default function MyResults() {
   const [certificateError, setCertificateError] = useState(null);
   const [downloadingPoster, setDownloadingPoster] = useState(null);
   const [posterError, setPosterError] = useState(null);
+  const [posterTemplate, setPosterTemplate] = useState('emerald');
+  const [posterFont, setPosterFont] = useState('poppins');
   const knownResults = useRef(new Set());
 
   useEffect(() => {
@@ -85,6 +87,8 @@ export default function MyResults() {
     try {
       await downloadResultsPoster({
         program: item.program,
+        template: posterTemplate,
+        font: posterFont,
         winners: [{
           rank: item.result.rank,
           student_name: item.student_name,
@@ -139,6 +143,24 @@ export default function MyResults() {
 
       {registrations && (
         <div className="student-results-list" aria-live="polite">
+          {registrations.some(item => item.results_published && item.result && item.result.rank <= 3) && (
+            <div className="card">
+              <h3>Results poster design</h3>
+              <p className="muted small">Choose a poster template and font. Your selection applies to each of your downloadable result posters.</p>
+              <div className="grid-2">
+                <label>Poster template
+                  <select value={posterTemplate} onChange={event => setPosterTemplate(event.target.value)}>
+                    {POSTER_TEMPLATES.map(template => <option key={template.id} value={template.id}>{template.name}</option>)}
+                  </select>
+                </label>
+                <label>Poster font
+                  <select value={posterFont} onChange={event => setPosterFont(event.target.value)}>
+                    {POSTER_FONTS.map(font => <option key={font.id} value={font.id}>{font.name}</option>)}
+                  </select>
+                </label>
+              </div>
+            </div>
+          )}
           {registrations.length === 0 ? (
             <div className="card student-results-empty">
               <h3>No registrations found</h3>
