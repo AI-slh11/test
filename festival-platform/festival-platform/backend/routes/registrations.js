@@ -9,9 +9,9 @@ const { assignedJudgeIds, updateJudgingStatus } = require('../registrationJudges
 
 // 4 digits + 2-3 letters + 3 digits, e.g. 2023CSE001
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
-const isGroupProgramName = name => /\b(qawwali|group\s+song|quiz|nasheeda?)\b/i.test(String(name || ''));
+const isGroupProgramName = name => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(name || ''));
 const INDIVIDUAL_STAGE_PROGRAM_FILTER = `lower(p.name) NOT LIKE '%qawwali%' AND lower(p.name) NOT LIKE '%group song%'
-  AND lower(p.name) NOT LIKE '%quiz%' AND lower(p.name) NOT LIKE '%nasheed%'`;
+  AND lower(p.name) NOT LIKE '%nasheed%'`;
 
 const CODE_LETTER_RE = /^[A-Z]{1,2}$/;
 const isPendingCode = (value) => String(value || '').startsWith('PENDING-');

@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
 
-const isGroupProgram = name => /\b(qawwali|group\s+song|quiz|nasheeda?)\b/i.test(String(name || ''));
+const isGroupProgram = name => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(name || ''));
 
 export default function GreenRoom() {
   const [programs, setPrograms] = useState([]);

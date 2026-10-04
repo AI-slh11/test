@@ -3,7 +3,7 @@ import { api } from '../api.js';
 import { TEAMS } from '../teams.js';
 import { CATEGORIES, programLabel } from '../categories.js';
 
-const isGroupProgram = program => /\b(qawwali|group\s+song|quiz|nasheeda?)\b/i.test(String(program?.name || ''));
+const isGroupProgram = program => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(program?.name || ''));
 
 export default function Register() {
   const [programs, setPrograms] = useState([]);
@@ -62,7 +62,7 @@ export default function Register() {
       const report = [];
       const successfulPairs = { ...completedPairs };
       if (teamLeaderMode) {
-        if (requiresGroupRoster) throw new Error('Qawwali, Group Song, Quiz, and Nasheeda are group programs. Turn off team leader roster mode and register the performers together as one group entry.');
+        if (requiresGroupRoster) throw new Error('Qawwali, Group Song, and Nasheeda are group programs. Turn off team leader roster mode and register the performers together as one group entry.');
         const entries = roster.filter(row => row.student_name.trim() || row.student_id.trim());
         if (!entries.length) throw new Error('Add at least one student to the roster.');
         const ids = entries.map(row => row.student_id.trim().toUpperCase());
