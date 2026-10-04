@@ -27,10 +27,12 @@ router.post('/', requireRole('judge'), (req, res) => {
     return res.status(403).json({ error: 'You are not assigned to score this participant' });
   }
 
+  let scorecardId;
   try {
-    db.prepare(`
+    const inserted = db.prepare(`
       INSERT INTO scores (registration_id, judge_id, score, grade, remarks) VALUES (?,?,?,?,?)
     `).run(registration_id, judge_id, score, grade, remarks || null);
+    scorecardId = Number(inserted.lastInsertRowid);
   } catch (e) {
     return res.status(409).json({ error: 'This judge has already submitted a final score for this participant' });
   }
@@ -43,11 +45,12 @@ router.post('/', requireRole('judge'), (req, res) => {
     registration_id, code_letter: registration.code_letter
   });
 
-  res.status(201).json({ ok: true });
+  res.status(201).json({ ok: true, score_id: scorecardId });
 });
 
-// Organizer corrections are audited by updating the existing scorecard in place.
-router.patch('/:scoreId', requireRole('organizer'), (req, res) => {
+// Organizers can correct any active scorecard; judges can edit only their own
+// scorecards while they remain assigned to the participant.
+router.patch('/:scoreId', requireRole('organizer', 'judge'), (req, res) => {
   const scoreId = Number(req.params.scoreId);
   const score = Number(req.body?.score);
   const { grade, remarks } = req.body || {};
@@ -59,6 +62,9 @@ router.patch('/:scoreId', requireRole('organizer'), (req, res) => {
     FROM scores s JOIN registrations r ON r.id = s.registration_id
     JOIN programs p ON p.id = r.program_id WHERE s.id = ?`).get(scoreId);
   if (!existing) return res.status(404).json({ error: 'Score not found' });
+  if (req.user.role === 'judge' && Number(existing.judge_id) !== Number(req.user.id)) {
+    return res.status(403).json({ error: 'You can only edit your own scorecards' });
+  }
   if (!isAssignedJudgeToRegistration(existing.judge_id, existing.registration_id)) {
     return res.status(409).json({ error: 'This scorecard is historical because the judge is no longer assigned to this student' });
   }
@@ -73,10 +79,10 @@ router.patch('/:scoreId', requireRole('organizer'), (req, res) => {
 
 // Judges only see their current scores; archived scorecards from removed panelists stay private to organizers.
 
-// All scores a specific judge has already given (so their UI can grey those out)
+// Return the judge's active scorecards so the portal can edit them in place.
 router.get('/by-judge/:judgeId', requireRole('judge'), (req, res) => {
   if (String(req.user.id) !== String(req.params.judgeId)) return res.status(403).json({ error: 'You can only view your own scores' });
-  const rows = db.prepare('SELECT registration_id, score, grade, remarks FROM scores WHERE judge_id = ?').all(req.params.judgeId)
+  const rows = db.prepare('SELECT id, registration_id, score, grade, remarks FROM scores WHERE judge_id = ?').all(req.params.judgeId)
     .filter(row => isAssignedJudgeToRegistration(req.user.id, row.registration_id));
   res.json(rows);
 });

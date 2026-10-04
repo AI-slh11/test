@@ -70,11 +70,15 @@ export default function JudgePortal() {
     e.preventDefault();
     setError('');
     try {
-      await api.submitScore({
-        registration_id: selected.id, judge_id: user.id,
-        score: Number(scoreForm.score), grade: scoreForm.grade, remarks: scoreForm.remarks
-      });
-      setMyScores(prev => ({ ...prev, [selected.id]: scoreForm }));
+      const payload = { score: Number(scoreForm.score), grade: scoreForm.grade, remarks: scoreForm.remarks };
+      let scorecardId = selected.scorecardId;
+      if (scorecardId) {
+        await api.updateScore(selected.scorecardId, payload);
+      } else {
+        const result = await api.submitScore({ registration_id: selected.id, judge_id: user.id, ...payload });
+        scorecardId = result.score_id;
+      }
+      setMyScores(prev => ({ ...prev, [selected.id]: { ...prev[selected.id], ...payload, id: scorecardId } }));
       setSelected(null);
       setScoreForm({ score: '', grade: 'A', remarks: '' });
     } catch (err) {
@@ -108,7 +112,15 @@ export default function JudgePortal() {
                       <td>{STATUS_LABEL[r.status] || r.status}</td>
                       <td>{mine ? `${mine.score} (${mine.grade})` : '—'}</td>
                       <td>
-                        {!mine && <button onClick={() => setSelected(r)}>Judge</button>}
+                        {mine ? <button className="secondary" onClick={() => {
+                          setSelected({ ...r, scorecardId: mine.id });
+                          setScoreForm({ score: String(mine.score), grade: mine.grade, remarks: mine.remarks || '' });
+                          setError('');
+                        }}>Edit score</button> : <button onClick={() => {
+                          setSelected(r);
+                          setScoreForm({ score: '', grade: 'A', remarks: '' });
+                          setError('');
+                        }}>Judge</button>}
                       </td>
                     </tr>
                   );
@@ -120,7 +132,7 @@ export default function JudgePortal() {
 
           {selected && (
             <div className="card">
-              <h3>Score Participant {selected.code_letter}</h3>
+              <h3>{selected.scorecardId ? 'Edit score' : 'Score participant'} {selected.code_letter}</h3>
               <form onSubmit={submitScore}>
                 <label>Numerical Score (0-100)</label>
                 <input type="number" min="0" max="100" step="0.5" value={scoreForm.score}
@@ -133,8 +145,8 @@ export default function JudgePortal() {
                 <textarea maxLength={500} value={scoreForm.remarks}
                   onChange={e => setScoreForm({ ...scoreForm, remarks: e.target.value })} rows={4} />
                 {error && <p className="error">{error}</p>}
-                <p className="muted small">Scores are final once submitted — there is no revision or appeal.</p>
-                <button type="submit">Submit Final Score</button>
+                <p className="muted small">{selected.scorecardId ? 'Saving updates your existing scorecard and recalculates the result.' : 'You can revise this scorecard later if needed.'}</p>
+                <button type="submit">{selected.scorecardId ? 'Save score changes' : 'Submit score'}</button>
                 <button type="button" className="secondary" onClick={() => setSelected(null)}>Cancel</button>
               </form>
             </div>
