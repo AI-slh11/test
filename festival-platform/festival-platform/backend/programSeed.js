@@ -87,6 +87,31 @@ function seedPrograms(db) {
     () => 'stage');
   seedGeneralStagePrograms(db);
   consolidateGeneralStagePrograms(db);
+  migrateOfficialQuizProgramsToStage(db);
+}
+
+function migrateOfficialQuizProgramsToStage(db) {
+  const key = 'programs_quiz_type_stage_v6';
+  if (db.prepare('SELECT 1 FROM meta WHERE key = ?').get(key)) return;
+
+  const migrate = db.transaction(() => {
+    const quizzes = db.prepare(`SELECT id, code, type FROM programs
+      WHERE lower(trim(name)) = 'quiz' AND category IN ('premier', 'junior')
+        AND code IN ('P35', 'J112')`).all();
+    const updateType = db.prepare("UPDATE programs SET type = 'stage' WHERE id = ? AND type != 'stage'");
+    const audit = db.prepare(`INSERT INTO audit_log (actor, action, entity, entity_id, details)
+      VALUES ('system migration', 'correct_program_type', 'program', ?, ?)`);
+    for (const program of quizzes) {
+      const result = updateType.run(program.id);
+      if (result.changes) {
+        audit.run(String(program.id), JSON.stringify({
+          program: 'Quiz', code: program.code, from: program.type, to: 'stage', registrations_preserved: true
+        }));
+      }
+    }
+    db.prepare("INSERT INTO meta (key, value) VALUES (?, datetime('now'))").run(key);
+  });
+  migrate();
 }
 
 function seedGeneralStagePrograms(db) {

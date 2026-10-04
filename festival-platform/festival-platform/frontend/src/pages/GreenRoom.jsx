@@ -5,6 +5,7 @@ import { TEAMS } from '../teams.js';
 import TeamBadge from '../TeamBadge.jsx';
 
 const isGroupProgram = name => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(name || ''));
+const isIndividualProgram = name => /^quiz$/i.test(String(name || '').trim());
 
 export default function GreenRoom() {
   const [programs, setPrograms] = useState([]);
@@ -34,6 +35,7 @@ export default function GreenRoom() {
 
   const program = programs.find(p => String(p.id) === String(activeProgram));
   const requiredGroupProgram = isGroupProgram(program?.name);
+  const individualProgram = isIndividualProgram(program?.name);
   const allCodeLetters = [...'ABCDEFGHIJKLMNOPQRSTUVWXYZ', ...'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').flatMap(first => 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').map(second => `${first}${second}`))];
   const assignmentConflicts = program ? form.judge_ids.flatMap(judgeId => {
     const judge = judges.find(item => String(item.id) === String(judgeId));
@@ -57,7 +59,8 @@ export default function GreenRoom() {
       return;
     }
     try {
-      await api.register({ ...form, is_team: form.is_team || requiredGroupProgram, program_id: activeProgram, source: 'onsite' });
+      const groupEntry = requiredGroupProgram || (form.is_team && !individualProgram);
+      await api.register({ ...form, is_team: groupEntry, team_members: groupEntry ? form.team_members : '', program_id: activeProgram, source: 'onsite' });
       setForm({ student_name: '', student_id: '', team_name: '', is_team: false, team_members: '', language: '', judge_ids: [] });
       loadRegistrations(activeProgram);
       loadPrograms();
@@ -173,11 +176,11 @@ export default function GreenRoom() {
                   <option value="">Select team...</option>
                   {TEAMS.map(t => <option key={t.key} value={t.key}>{t.label} — {t.key}</option>)}
                 </select>
-                {requiredGroupProgram ? <p className="muted small">This is a group program; enter every other performer below.</p> : <label className="checkbox">
+                {requiredGroupProgram ? <p className="muted small">This is a group program; enter every other performer below.</p> : individualProgram ? <p className="muted small">Quiz is an individual stage program. Register each participant separately.</p> : <label className="checkbox">
                   <input type="checkbox" checked={form.is_team} onChange={e => setForm({ ...form, is_team: e.target.checked })} />
                   Group entry
                 </label>}
-                {(form.is_team || requiredGroupProgram) && (
+                {(form.is_team && !individualProgram || requiredGroupProgram) && (
                   <input placeholder="Other performers, comma separated" value={form.team_members}
                     onChange={e => setForm({ ...form, team_members: e.target.value })} />
                 )}

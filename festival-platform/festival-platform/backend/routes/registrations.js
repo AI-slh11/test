@@ -10,6 +10,7 @@ const { assignedJudgeIds, updateJudgingStatus } = require('../registrationJudges
 // 4 digits + 2-3 letters + 3 digits, e.g. 2023CSE001
 const STUDENT_ID_RE = /^\d{4}[A-Z]{2,3}\d{3}$/;
 const isGroupProgramName = name => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(name || ''));
+const isIndividualProgramName = name => /^quiz$/i.test(String(name || '').trim());
 const INDIVIDUAL_STAGE_PROGRAM_FILTER = `lower(p.name) NOT LIKE '%qawwali%' AND lower(p.name) NOT LIKE '%group song%'
   AND lower(p.name) NOT LIKE '%nasheed%'`;
 
@@ -80,7 +81,10 @@ router.post('/', optionalAuth, (req, res) => {
   if (!program) return res.status(404).json({ error: 'Program not found' });
   if (program.results_published) return res.status(409).json({ error: 'Unpublish this program before registering students or changing its panel' });
   const requiredGroupProgram = isGroupProgramName(program.name);
-  const groupEntry = !!is_team || requiredGroupProgram;
+  if (isIndividualProgramName(program.name) && (!!is_team || (Array.isArray(rawTeamRoster) && rawTeamRoster.length))) {
+    return res.status(400).json({ error: 'Quiz is an individual program. Register each participant separately.' });
+  }
+  const groupEntry = (!!is_team && !isIndividualProgramName(program.name)) || requiredGroupProgram;
   let teamRoster = [];
   if (groupEntry) {
     if (rawTeamRoster !== undefined && !Array.isArray(rawTeamRoster)) return res.status(400).json({ error: 'Group members must be a list of students' });
@@ -194,7 +198,8 @@ router.post('/bulk', requireOrganizerOrControlAdmin, (req, res) => {
     const program = db.prepare('SELECT * FROM programs WHERE id = ?').get(programId);
     if (!program || program.results_published) { results.push({ row: index + 1, error: !program ? 'Program not found' : 'Program results are published' }); continue; }
     if (db.prepare('SELECT 1 FROM registrations WHERE program_id = ? AND student_id = ?').get(programId, studentId)) { results.push({ row: index + 1, error: 'Duplicate Student ID for this program' }); continue; }
-    const groupEntry = !!row.is_team || isGroupProgramName(program.name);
+    if (isIndividualProgramName(program.name) && row.is_team) { results.push({ row: index + 1, error: 'Quiz is an individual program; register each participant separately' }); continue; }
+    const groupEntry = (!!row.is_team && !isIndividualProgramName(program.name)) || isGroupProgramName(program.name);
     if (isGroupProgramName(program.name) && !String(row.team_members || '').trim()) { results.push({ row: index + 1, error: `${program.name} is a group program; add the other performers' names` }); continue; }
     if (!groupEntry && program.type === 'stage') {
       const stageCount = db.prepare(`SELECT COUNT(DISTINCT p.id) AS count FROM registrations r JOIN programs p ON p.id = r.program_id

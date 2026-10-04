@@ -4,6 +4,7 @@ import { TEAMS } from '../teams.js';
 import { CATEGORIES, programLabel } from '../categories.js';
 
 const isGroupProgram = program => /\b(qawwali|group\s+song|nasheeda?)\b/i.test(String(program?.name || ''));
+const isIndividualProgram = program => /^quiz$/i.test(String(program?.name || '').trim());
 
 export default function Register() {
   const [programs, setPrograms] = useState([]);
@@ -31,6 +32,8 @@ export default function Register() {
   const categoryPrograms = programs.filter(p => category === 'general' ? !p.category : p.category === category);
   const selectedPrograms = selectedProgramIds.map(id => programs.find(p => String(p.id) === String(id))).filter(Boolean);
   const requiresGroupRoster = selectedPrograms.some(isGroupProgram);
+  const supportsGroupEntry = selectedPrograms.some(program => !isIndividualProgram(program));
+  const needsGroupMembers = selectedPrograms.some(program => isGroupProgram(program) || (form.is_team && !isIndividualProgram(program)));
   const needsLanguage = selectedPrograms.some(program => program.type === 'writing' && !program.language);
   useEffect(() => {
     if (requiresGroupRoster && !groupMembers.length) setGroupMembers([{ student_id: '', student_name: '', lookup: '' }]);
@@ -72,14 +75,13 @@ export default function Register() {
             const pairKey = `${student.student_id.trim().toUpperCase()}|${program.id}`;
             if (successfulPairs[pairKey]) continue;
             try {
-              const { registration } = await api.register({ ...form, ...student, program_id: program.id, language: form.language || program.language || '', source: 'online', team_leader_name: leader.name, team_leader_id: leader.student_id });
+              const { registration } = await api.register({ ...form, ...student, is_team: false, team_members: '', program_id: program.id, language: form.language || program.language || '', source: 'online', team_leader_name: leader.name, team_leader_id: leader.student_id });
               successfulPairs[pairKey] = true;
               report.push({ student: student.student_name || student.student_id, program: programLabel(program), registration });
             } catch (err) { report.push({ student: student.student_name || student.student_id, program: programLabel(program), error: err.message }); }
           }
         }
       } else {
-        const needsGroupMembers = form.is_team || requiresGroupRoster;
         const additionalMembers = needsGroupMembers ? groupMembers : [];
         if (needsGroupMembers && additionalMembers.length < 1) throw new Error('Add at least one other group member and enter their Student ID.');
         const memberIds = additionalMembers.map(member => String(member.student_id || '').trim().toUpperCase());
@@ -91,8 +93,8 @@ export default function Register() {
           const pairKey = `${studentKey}|${program.id}`;
           if (successfulPairs[pairKey]) continue;
           try {
-            const groupEntry = form.is_team || isGroupProgram(program);
-            const { registration } = await api.register({ ...form, is_team: groupEntry, program_id: program.id,
+            const groupEntry = isGroupProgram(program) || (form.is_team && !isIndividualProgram(program));
+            const { registration } = await api.register({ ...form, is_team: groupEntry, team_members: groupEntry ? form.team_members : '', program_id: program.id,
               team_roster: groupEntry ? additionalMembers.map(({ student_id, student_name }) => ({ student_id, student_name })) : [],
               language: form.language || program.language || '', source: 'online' });
             successfulPairs[pairKey] = true;
@@ -212,11 +214,11 @@ export default function Register() {
           Individual Stage programs: {stageCount.count} of 5 registered; {stageCount.remaining} remaining.
         </p>}
 
-        {requiresGroupRoster ? <p className="muted small">This selection includes a group program. Add every other performer below; the registration will be saved as a group entry.</p> : <label className="checkbox">
+        {requiresGroupRoster ? <p className="muted small">This selection includes a group program. Add every other performer below; the registration will be saved as a group entry.</p> : supportsGroupEntry ? <label className="checkbox">
           <input type="checkbox" checked={form.is_team} onChange={e => { const checked = e.target.checked; setForm({ ...form, is_team: checked }); if (checked && !groupMembers.length) setGroupMembers([{ student_id: '', student_name: '', lookup: '' }]); }} />
           Group entry (more than one performer)
-        </label>}
-        {(form.is_team || requiresGroupRoster) && (
+        </label> : selectedPrograms.length > 0 ? <p className="muted small">Quiz is an individual stage program. Register each participant separately.</p> : null}
+        {needsGroupMembers && (
           <>
             <p className="muted small">Enter each member’s Student ID to look up their existing details. If they aren’t registered yet, enter their name and Student ID when prompted.</p>
             {groupMembers.map((member, index) => <div className="card" key={index}>
