@@ -190,6 +190,20 @@ router.put('/points-pause', requireRole('organizer'), (req, res) => {
 // NOTE: /public/feed must be declared before /:programId so "public" isn't read as an id.
 router.get('/public/feed', (req, res) => res.json(buildPublicFeed()));
 
+// Organizer-only standings remain available when public totals are hidden.
+// When paused, match the frozen snapshot currently shown publicly.
+router.get('/organizer/team-standings', requireRole('organizer'), (req, res) => {
+  const visibility = getPointsVisibility();
+  const standings = visibility.total_team_points_paused
+    ? (readPausedStandings() || calculateCurrentTeamStandings())
+    : calculateCurrentTeamStandings();
+  res.json({
+    standings,
+    paused: visibility.total_team_points_paused,
+    publicly_visible: visibility.show_total_team_points || visibility.total_team_points_paused
+  });
+});
+
 // Student self-service lookup. Only published final results are disclosed; judge
 // scorecards and unpublished rankings remain private to the organizer.
 router.post('/student-lookup', (req, res) => {

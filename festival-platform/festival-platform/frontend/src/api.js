@@ -146,6 +146,7 @@ export const api = {
   deleteRegistration: (id) => request(`/registrations/${id}`, { method: 'DELETE' }),
 
   publicFeed: () => request('/results/public/feed'),
+  organizerTeamStandings: () => request('/results/organizer/team-standings'),
   pointsVisibility: () => request('/results/visibility'),
   setPointsVisibility: (visibility) => request('/results/visibility', { method: 'PUT', body: JSON.stringify(visibility) }),
   setTotalPointsPaused: (paused) => request('/results/points-pause', { method: 'PUT', body: JSON.stringify({ paused }) }),

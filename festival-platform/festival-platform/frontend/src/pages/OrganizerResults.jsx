@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api } from '../api.js';
 import { programLabel } from '../categories.js';
 import TeamBadge from '../TeamBadge.jsx';
+import { TEAMS } from '../teams.js';
 import { downloadResultsPoster, POSTER_FONTS, POSTER_TEMPLATES } from '../resultsPoster.js';
 
 const placeNames = { 1: '1st', 2: '2nd', 3: '3rd' };
@@ -23,6 +24,9 @@ export default function OrganizerResults({ programs }) {
   const [posterTemplate, setPosterTemplate] = useState('emerald');
   const [posterFont, setPosterFont] = useState('poppins');
   const [pointsVisibility, setPointsVisibility] = useState({ show_total_team_points: true, show_program_team_points: true, total_team_points_paused: false });
+  const [organizerStandings, setOrganizerStandings] = useState(null);
+  const [standingsLoading, setStandingsLoading] = useState(true);
+  const [standingsError, setStandingsError] = useState('');
   const [visibilityLoading, setVisibilityLoading] = useState(true);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const [pauseSaving, setPauseSaving] = useState(false);
@@ -30,7 +34,21 @@ export default function OrganizerResults({ programs }) {
   useEffect(() => {
     api.pointsVisibility().then(setPointsVisibility).catch(e => setError(e.message || 'Could not load public points settings.'))
       .finally(() => setVisibilityLoading(false));
+    api.organizerTeamStandings().then(setOrganizerStandings)
+      .catch(e => setStandingsError(e.message || 'Could not load organizer team totals.'))
+      .finally(() => setStandingsLoading(false));
   }, []);
+
+  const refreshOrganizerStandings = async () => {
+    setStandingsError('');
+    try {
+      setOrganizerStandings(await api.organizerTeamStandings());
+    } catch (e) {
+      setStandingsError(e.message || 'Could not refresh organizer team totals.');
+    } finally {
+      setStandingsLoading(false);
+    }
+  };
 
   const loadReview = async (id = programId) => {
     if (!id) { setReview(null); setTeamPoints({ 1: '', 2: '', 3: '' }); return; }
@@ -100,6 +118,7 @@ export default function OrganizerResults({ programs }) {
       const points = Object.fromEntries([1, 2, 3].map(place => [place, teamPoints[place] === '' ? null : Number(teamPoints[place])]));
       await api.setResultPlaces(programId, placements, points);
       await loadReview(programId);
+      await refreshOrganizerStandings();
       setMessage(review?.program.results_published
         ? 'Published places updated on the public leaderboard.'
         : 'Places saved. Review them, then publish when every participant has been judged.');
@@ -117,6 +136,7 @@ export default function OrganizerResults({ programs }) {
     try {
       await api.setPublished(programId, published);
       await loadReview(programId);
+      await refreshOrganizerStandings();
       setMessage(published ? 'Results published to the public leaderboard.' : 'Results unpublished. You can now edit places.');
     } catch (e) {
       setError(e.message || 'Could not update publication status.');
@@ -132,6 +152,7 @@ export default function OrganizerResults({ programs }) {
     try {
       const saved = await api.setPointsVisibility(pointsVisibility);
       setPointsVisibility(saved);
+      await refreshOrganizerStandings();
       setMessage('Public team-point display updated. Saved results and point values are unchanged.');
     } catch (e) {
       setError(e.message || 'Could not update public points visibility.');
@@ -148,6 +169,7 @@ export default function OrganizerResults({ programs }) {
     try {
       const saved = await api.setTotalPointsPaused(paused);
       setPointsVisibility(current => ({ ...current, ...saved }));
+      await refreshOrganizerStandings();
       setMessage(paused
         ? 'Overall team totals are paused and remain visible. New published results will not change the frozen totals.'
         : 'Overall team totals are live again and will include all currently published results.');
@@ -165,6 +187,7 @@ export default function OrganizerResults({ programs }) {
     try {
       const saved = await api.setTotalPointsPaused(true);
       setPointsVisibility(current => ({ ...current, ...saved }));
+      await refreshOrganizerStandings();
       setMessage('Paused totals refreshed from all results currently published. Result records and assigned points are unchanged.');
     } catch (e) {
       setError(e.message || 'Could not refresh the paused totals.');
@@ -184,6 +207,7 @@ export default function OrganizerResults({ programs }) {
       await api.updateScore(editingScore.id, { ...scoreForm, score: Number(scoreForm.score) });
       setEditingScore(null);
       await loadReview(programId);
+      await refreshOrganizerStandings();
       setMessage('Scorecard updated. The program average and rankings were recalculated.');
     } catch (e) {
       setError(e.message || 'Could not update scorecard.');
@@ -262,6 +286,23 @@ export default function OrganizerResults({ programs }) {
           <button className="secondary" disabled={visibilityLoading || visibilitySaving} onClick={savePointsVisibility}>
             {visibilityLoading ? 'Loading settings…' : visibilitySaving ? 'Saving…' : 'Save public display settings'}
           </button>
+        </div>
+        <div className="card organizer-team-standings" aria-live="polite">
+          <h3>Organizer team totals</h3>
+          <p className="muted">
+            {organizerStandings?.publicly_visible
+              ? 'These totals are also visible on the public results pages.'
+              : 'Public totals are hidden. Organizers can still see the current totals here.'}
+            {organizerStandings?.paused ? ' Totals are frozen at the saved pause snapshot.' : ''}
+          </p>
+          {standingsLoading ? <p className="muted" role="status">Loading organizer totals…</p>
+            : standingsError ? <p className="error" role="alert">{standingsError}</p>
+              : <div className="grid-2">{TEAMS.map(team => (
+                <div className="organizer-team-total" key={team.key}>
+                  <TeamBadge name={team.key} />
+                  <strong>{Number(organizerStandings?.standings?.[team.key] || 0)} pts</strong>
+                </div>
+              ))}</div>}
         </div>
       </div>
 

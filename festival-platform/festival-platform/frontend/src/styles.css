@@ -144,6 +144,8 @@ tr.place-3 { background: #fde7d1; }
 
 .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 @media (max-width: 800px) { .grid-2 { grid-template-columns: 1fr; } }
+.organizer-team-total { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
+.organizer-team-total strong { color: var(--solid-1); font-size: 1.15rem; white-space: nowrap; }
 
 .success-box {
   margin-top: 16px; padding: 14px; border: 1px solid var(--success); border-radius: 8px; background: #f0fdf4;
